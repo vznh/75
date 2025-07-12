@@ -32,7 +32,7 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
   if (interaction.customId === "submit") {
-    await interaction.reply({ content: "* Starting daily goals submission!", ephemeral: true });
+    await interaction.reply({ content: "* Thread created!", ephemeral: true });
 
     const channel = interaction.channel;
     if (!channel || !channel.isTextBased()) {
@@ -51,27 +51,27 @@ client.on("interactionCreate", async (interaction) => {
 
     const objectives = [
       {
-        prompt: "- Outside workout (sports, running, cycling, ...): takes string/img",
+        prompt: "> Outside workout (sports, running, cycling, ...): takes string/img",
         requireText: false,
         requireImage: false,
       },
       {
-        prompt: "- Inside workout (gym, calisthenics, ...): takes string/img",
+        prompt: "> Inside workout (gym, calisthenics, ...): takes string/img",
         requireText: false,
         requireImage: false,
       },
       {
-        prompt: "- Diet adherence (did you meet your calorie goal today? (dev. ~200 allowed)): takes string/image",
+        prompt: "> Diet adherence (did you meet your calorie goal today? (dev. ~200 allowed)): takes string/image",
         requireText: false,
         requireImage: false,
       },
       {
-        prompt: "- Water intake tracking (1gal): takes image",
+        prompt: "> Water intake tracking (1gal): takes image",
         requireText: false,
         requireImage: true,
       },
       {
-        prompt: "- Progress picture (w/ current weight): takes image + string (req)",
+        prompt: "> Progress picture (w/ current weight): takes image + string (req)",
         requireText: true,
         requireImage: true,
       },
@@ -105,7 +105,7 @@ client.on("interactionCreate", async (interaction) => {
 
       responses.push({
         text: containsText ? msg.content : undefined,
-        image: containsImage ? msg.url : undefined,
+        image: containsImage ? msg.attachments.first()?.url : undefined,
       });
 
       today++;
@@ -123,8 +123,62 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      let summary = "";
-    })
+      const mainEmbed = new EmbedBuilder()
+        .setTitle(`(${new Date().toLocaleDateString('en-US', { day: '2-digit', month: '2-digit' })}) - ${interaction.user.username}`)
+        .setColor(0x00ff00)
+        .setTimestamp();
+
+      // Collect all images for separate embeds
+      const imageEmbeds: EmbedBuilder[] = [];
+      let imageIndex = 0;
+
+      for (let i = 0; i < objectives.length; i++) {
+        const response = responses[i];
+        let fieldValue = "";
+
+        if (response?.text) {
+          fieldValue = response.text;
+        }
+
+        mainEmbed.addFields({
+          name: `> ${objectives[i].prompt}`,
+          value: fieldValue || "No response",
+          inline: false
+        });
+
+        // If this objective has an image, create a separate embed for it
+        if (response?.image) {
+          const imageEmbed = new EmbedBuilder()
+            .setTitle(`📸 ${objectives[i].prompt}`)
+            .setColor(0x0099ff)
+            .setImage(response.image)
+            .setTimestamp();
+          imageEmbeds.push(imageEmbed);
+        }
+      }
+
+      try {
+        const mainChannel = await client.channels.fetch(process.env.LOG_CHANNEL_ID!);
+        if (mainChannel && mainChannel.isTextBased()) {
+          // Send main embed with text content
+          await (mainChannel as TextChannel).send({
+            content: `(★‿★) **${interaction.user.username}** completed their day.`,
+            embeds: [mainEmbed]
+          });
+
+          if (imageEmbeds.length > 0) {
+            for (const imageEmbed of imageEmbeds) {
+              await (mainChannel as TextChannel).send({ embeds: [imageEmbed] });
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error posting to main channel:", error);
+      }
+
+      await thread.send("* Your submission is complete!");
+      await thread.setArchived(true);
+    });
 
   } else if (interaction.customId === "request") {
     await interaction.reply({ content: "* Starting cheat day request!", ephemeral: true });
