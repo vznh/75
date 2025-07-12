@@ -1,4 +1,7 @@
 # kept
+Me and my friends want to do 75 hard, but it's pretty ambiguous on how we submit stuff. Built in less than 12 hours, keeps us accountable & logs in an organized format.
+
+Roadmap is looking pretty short (because it's just gonna last us 75 days), just adding who hasn't done it yet, adding slash commands to find certain days, etc..  
 
 Developing should be easy - see `index.ts` for most functionality, `bot.ts` if you want to add more buttons.
 Environment variables look like
@@ -21,6 +24,3 @@ To run:
 ```bash
 bun run dev
 ```
-
-
-This project was created using `bun init` in bun v1.0.12. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
