@@ -12,7 +12,7 @@ SUPABASE_ANON_KEY=[your_value_here] # Not needed as of v1
 MAIN_CHANNEL_ID=[your_value_here]   # Your main channel where the bot's actions are
 LOG_CHANNEL_ID=[your_value_here]    # The channel where the bot could output their logs
 ```
-
+Want to install **kept** in your own repository? Click [here](https://discord.com/oauth2/authorize?client_id=1393141688972607589&permissions=0&integration_type=0&scope=bot+applications.commands).
 To install dependencies:
 
 ```bash
