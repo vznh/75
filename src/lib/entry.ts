@@ -19,10 +19,10 @@ const activeSessions = new Map<string, EntrySession>();
 
 export class EntryService {
   static getCurrentDayNumber(): number {
-    const startDate = new Date('2025-10-05');
+    const startDate = new Date('2025-10-06');
     const today = new Date();
     const diffTime = today.getTime() - startDate.getTime();
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 because Oct 5th is day 1
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 because Oct 6th is day 1
     return Math.max(1, diffDays); // Ensure minimum day 1
   }
 
@@ -795,5 +795,72 @@ export class EntryService {
     } catch (error) {
       console.error('Error resetting daily status:', error);
     }
+  }
+
+  static async ensureRolesExist(guild: Guild): Promise<void> {
+    try {
+      console.log('Checking and creating missing challenge roles...');
+
+      // Get all goal definitions
+      const allGoals = getAllGoalDefinitions();
+
+      for (const goalDef of allGoals) {
+        const roleName = goalDef.role;
+        const emoji = goalDef.emoji;
+
+        try {
+          // Check if role already exists
+          let role = guild.roles.cache.find(r => r.name.toLowerCase() === roleName.toLowerCase());
+
+          if (!role) {
+            // Create the role if it doesn't exist
+            console.log(`Creating role: ${roleName} with emoji: ${emoji}`);
+
+            role = await guild.roles.create({
+              name: roleName,
+              color: this.getGoalColor(roleName),
+              reason: `Auto-created role for ${goalDef.name} challenge goal`,
+              mentionable: true,
+            });
+
+            console.log(`✅ Created role: ${roleName}`);
+          } else {
+            console.log(`✅ Role already exists: ${roleName}`);
+          }
+
+          // Ensure the role has the correct color
+          if (role.color !== this.getGoalColor(roleName)) {
+            await role.edit({
+              color: this.getGoalColor(roleName),
+              reason: 'Updating role color to match goal definition'
+            });
+            console.log(`🎨 Updated color for role: ${roleName}`);
+          }
+
+        } catch (error) {
+          console.error(`❌ Error handling role ${roleName}:`, error);
+        }
+      }
+
+      console.log('✅ Role check and creation completed');
+
+    } catch (error) {
+      console.error('Error ensuring roles exist:', error);
+    }
+  }
+
+  private static getGoalColor(roleName: string): number {
+    const colors: Record<string, number> = {
+      'leetcode': 0xFFA500, // Orange
+      'water': 0x0099FF, // Blue
+      'sleep': 0x9932CC, // Purple
+      'work': 0x32CD32, // Green
+      'food': 0xFF6347, // Tomato
+      'job applications': 0xFFD700, // Gold
+      'gym': 0xDC143C, // Crimson
+      'dj': 0xFF69B4, // Hot Pink
+      'reading': 0x8B4513, // Saddle Brown
+    };
+    return colors[roleName] || 0x0099FF; // Default blue
   }
 }

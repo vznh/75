@@ -160,6 +160,16 @@ client.once("ready", async () => {
   // Send instructions and entry buttons to the designated channel
   await b.sendInstructionsAndButtons();
 
+  // Ensure all challenge roles exist in the server
+  try {
+    const guild = client.guilds.cache.first();
+    if (guild) {
+      await EntryService.ensureRolesExist(guild);
+    }
+  } catch (error) {
+    console.error('Error ensuring roles exist:', error);
+  }
+
   // Initialize role selection message in channel 1424177763895607380
   await EntryService.createRoleSelectionMessage('1424177763895607380');
 
