@@ -1,14 +1,128 @@
 // entrypoint
 import { config } from "dotenv";
-import { Client, GatewayIntentBits, Partials } from "discord.js";
+import {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  SlashCommandBuilder,
+  REST,
+  Routes,
+} from "discord.js";
 import {
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  TextChannel
+  TextChannel,
 } from "discord.js";
 import * as b from "./func/bot";
+import { EntryService } from "./lib/entry";
+import { Message } from "discord.js";
+
+// Status message management
+let statusMessageId: string | null = null;
+const STATUS_CHANNEL_ID = '1424172599197565109';
+
+async function updateBotStatus(isOnline: boolean, reason?: string) {
+  try {
+    const channel = await client.channels.fetch(STATUS_CHANNEL_ID);
+
+    if (!channel || !channel.isTextBased()) {
+      console.error('Status channel not found or not text-based:', STATUS_CHANNEL_ID);
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle(isOnline ? "🤖 Bot is online!" : "🔴 Bot is offline!")
+      .setDescription(isOnline
+        ? "Bot is currently working and is active."
+        : `Bot is currently offline.${reason ? ` Reason: ${reason}` : ''}`
+      )
+      .setColor(isOnline ? 0x00FF00 : 0xFF0000) // Green for online, red for offline
+      .setTimestamp();
+
+    if (statusMessageId) {
+      // Try to edit existing message
+      try {
+        const message = await (channel as TextChannel).messages.fetch(statusMessageId);
+        await message.edit({ embeds: [embed] });
+        console.log(`Status updated: Bot ${isOnline ? 'online' : 'offline'}`);
+        return;
+      } catch (error) {
+        console.error('Error editing status message, will create new one:', error);
+        statusMessageId = null;
+      }
+    }
+
+    // Look for existing status message in the channel
+    if (!statusMessageId) {
+      try {
+        const messages = await (channel as TextChannel).messages.fetch({ limit: 10 });
+        const statusMessage = messages.find(msg => {
+          // Look for messages that contain our status embed pattern
+          return msg.embeds.length > 0 &&
+                 (msg.embeds[0].title?.includes('Bot is online') ||
+                  msg.embeds[0].title?.includes('Bot is offline'));
+        });
+
+        if (statusMessage) {
+          statusMessageId = statusMessage.id;
+          // Try to edit the found message
+          await statusMessage.edit({ embeds: [embed] });
+          console.log(`Found and updated existing status message: Bot ${isOnline ? 'online' : 'offline'}`);
+          return;
+        }
+      } catch (error) {
+        console.error('Error searching for existing status message:', error);
+      }
+    }
+
+    // Create new message if no existing one found
+    const message = await (channel as TextChannel).send({ embeds: [embed] });
+    statusMessageId = message.id;
+    console.log(`Status message created: Bot ${isOnline ? 'online' : 'offline'}`);
+  } catch (error) {
+    console.error('Error updating bot status:', error);
+  }
+}
+
+// Graceful shutdown handler
+async function gracefulShutdown(signal: string) {
+  console.log(`Received ${signal}. Shutting down gracefully...`);
+
+  // Determine if this was manual or unexpected shutdown
+  const isManualShutdown = signal === 'SIGINT';
+  const reason = isManualShutdown
+    ? 'Bot was manually shut off'
+    : `Bot shut off unexpectedly (signal: ${signal})`;
+
+  // Update status to offline before shutting down
+  await updateBotStatus(false, reason);
+
+  // Exit the process
+  process.exit(0);
+}
+
+// Set up signal handlers
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGUSR2', () => gracefulShutdown('SIGUSR2')); // For nodemon restarts
+process.on('exit', (code) => {
+  if (code !== 0) {
+    console.log(`Process exited with code ${code}`);
+  }
+});
+
+// Handle uncaught exceptions and unhandled rejections
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  gracefulShutdown('uncaughtException');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  gracefulShutdown('unhandledRejection');
+});
 config();
 
 export const client = new Client({
@@ -24,165 +138,181 @@ export const client = new Client({
 
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user?.tag}!`);
-  const mainChannel = process.env.MAIN_CHANNEL_ID!;
-  await b.main(mainChannel);
+
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("signup")
+      .setDescription("Enroll yourself as a participant for the challenge.")
+  ];
+
+  const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
+
+  try {
+    console.log("Started refreshing application (/) commands.");
+    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
+      body: commands,
+    });
+    console.log("Successfully reloaded application (/) commands.");
+  } catch (error) {
+    console.error(error);
+  }
+
+  // Send instructions and entry buttons to the designated channel
+  await b.sendInstructionsAndButtons();
+
+  // Initialize role selection message in channel 1424177763895607380
+  await EntryService.createRoleSelectionMessage('1424177763895607380');
+
+  // Set bot status to online
+  await updateBotStatus(true, 'Bot restarted and is now online');
 });
 
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  if (interaction.customId === "submit") {
-    await interaction.reply({ content: "* Thread created!", ephemeral: true });
-
-    const channel = interaction.channel;
-    if (!channel || !channel.isTextBased()) {
-      await interaction.reply({ content: "** Couldn't find the channel.", ephemeral: true });
-    }
-
-    const thread = await (channel as TextChannel).threads.create({
-      name: `(${new Date().toLocaleDateString('en-US', { day: '2-digit', month: '2-digit' })}) - ${interaction.user.username}`,
-      autoArchiveDuration: 60,
-      type: 12,
-      reason: "Your submission for today.",
-      invitable: false,
-    });
-
-    await thread.members.add(interaction.user.id);
-
-    const objectives = [
-      {
-        prompt: "> Outside workout (sports, running, cycling, ...): takes string/img",
-        requireText: false,
-        requireImage: false,
-      },
-      {
-        prompt: "> Inside workout (gym, calisthenics, ...): takes string/img",
-        requireText: false,
-        requireImage: false,
-      },
-      {
-        prompt: "> Diet adherence (did you meet your calorie goal today? (dev. ~200 allowed)): takes string/image",
-        requireText: false,
-        requireImage: false,
-      },
-      {
-        prompt: "> Water intake tracking (1gal): takes image",
-        requireText: false,
-        requireImage: true,
-      },
-      {
-        prompt: "> Progress picture (w/ current weight): takes image + string (req)",
-        requireText: true,
-        requireImage: true,
-      },
-    ];
-
-    let today = 0;
-    const responses: { text?: string; image?: string }[] = [];
-
-    await thread.send("**NOTE**: Your photos, texts, will be displayed publicly after this thread is closed.");
-    await thread.send(`${objectives[0].prompt}`);
-
-    const collector = thread.createMessageCollector({
-      filter: (m) => m.author.id === interaction.user.id,
-      time: 1000 * 60 * 15,
-    });
-
-    collector.on("collect", async (msg) => {
-      const obj = objectives[today];
-      const containsText = !!msg.content && msg.content.trim().length > 0;
-      const containsImage = msg.attachments.size > 0;
-
-      if (
-        (obj.requireText && !containsText) ||
-        (obj.requireImage && !containsImage)
-      ) {
-        await thread.send(
-          `!! Please provide${obj.requireText ? " text" : ""}${obj.requireText && obj.requireImage ? " and" : ""}${obj.requireImage ? " an image" : ""} for this goal.`
-        );
-        return;
-      }
-
-      responses.push({
-        text: containsText ? msg.content : undefined,
-        image: containsImage ? msg.attachments.first()?.url : undefined,
-      });
-
-      today++;
-      if (today < objectives.length) {
-        await thread.send(`${objectives[today].prompt}`);
-      } else {
-        collector.stop("done");
-      }
-    });
-
-    collector.on("end", async (collected, reason) => {
-      if (reason !== "done") {
-        await thread.send("!! Submission timed out, or was cancelled.");
-        await thread.setArchived(true);
-        return;
-      }
-
-      const mainEmbed = new EmbedBuilder()
-        .setTitle(`(${new Date().toLocaleDateString('en-US', { day: '2-digit', month: '2-digit' })}) - ${interaction.user.username}`)
-        .setColor(0x00ff00)
-        .setTimestamp();
-
-      // Collect all images for separate embeds
-      const imageEmbeds: EmbedBuilder[] = [];
-      let imageIndex = 0;
-
-      for (let i = 0; i < objectives.length; i++) {
-        const response = responses[i];
-        let fieldValue = "";
-
-        if (response?.text) {
-          fieldValue = response.text;
-        }
-
-        mainEmbed.addFields({
-          name: `> ${objectives[i].prompt}`,
-          value: fieldValue || "No response",
-          inline: false
-        });
-
-        // If this objective has an image, create a separate embed for it
-        if (response?.image) {
-          const imageEmbed = new EmbedBuilder()
-            .setTitle(`📸 ${objectives[i].prompt}`)
-            .setColor(0x0099ff)
-            .setImage(response.image)
-            .setTimestamp();
-          imageEmbeds.push(imageEmbed);
-        }
-      }
+  if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === "signup") {
 
       try {
-        const mainChannel = await client.channels.fetch(process.env.LOG_CHANNEL_ID!);
-        if (mainChannel && mainChannel.isTextBased()) {
-          // Send main embed with text content
-          await (mainChannel as TextChannel).send({
-            content: `(★‿★) **${interaction.user.username}** completed their day.`,
-            embeds: [mainEmbed]
-          });
+        // TODO: Add to Supabase database
+        // For now, just acknowledge the signup
+        await interaction.reply({
+          content: `✅ **${interaction.user.username}** has enrolled in the challenge.`,
+          ephemeral: true,
+        });
 
-          if (imageEmbeds.length > 0) {
-            for (const imageEmbed of imageEmbeds) {
-              await (mainChannel as TextChannel).send({ embeds: [imageEmbed] });
-            }
-          }
+        const mainChannel = await client.channels.fetch(
+          process.env.MAIN_CHANNEL_ID!,
+        );
+        if (mainChannel && mainChannel.isTextBased()) {
+          await (mainChannel as TextChannel).send({
+            content: `🎉 **${interaction.user.username}** has joined the challenge!`,
+          });
         }
       } catch (error) {
-        console.error("Error posting to main channel:", error);
+        console.error("Error during signup:", error);
+        await interaction.reply({
+          content: "❌ There was an error during signup. Please try again.",
+          ephemeral: true,
+        });
       }
+      return;
+    }
+  }
 
-      await thread.send("* Your submission is complete!");
-      await thread.setArchived(true);
-    });
+  // Handle button interactions
+  if (!interaction.isButton()) return;
 
-  } else if (interaction.customId === "request") {
-    await interaction.reply({ content: "* Starting cheat day request!", ephemeral: true });
+  if (interaction.customId === "create_entry") {
+    // Defer reply immediately to prevent interaction timeout
+    await interaction.deferReply({ ephemeral: true });
+
+    const member = interaction.member;
+    if (!member) {
+      await interaction.editReply({
+        content: "(ಠ_ಠ) Could not find member information.",
+      });
+      return;
+    }
+
+    try {
+      await EntryService.startEntry(member as any);
+      await interaction.editReply({
+        content: "(・∀・) Entry creation started! Check the archive channel for your thread.",
+      });
+    } catch (error) {
+      console.error('Error starting entry:', error);
+      await interaction.editReply({
+        content: "(ಠ_ಠ) Error starting entry. Please try again.",
+      });
+    }
+  } else if (interaction.customId === "view_entries") {
+    // Defer reply immediately to prevent interaction timeout
+    await interaction.deferReply({ ephemeral: true });
+
+    const member = interaction.member;
+    if (!member) {
+      await interaction.editReply({
+        content: "(ಠ_ಠ) Could not find member information.",
+      });
+      return;
+    }
+
+    try {
+      await EntryService.showPreviousEntries(member as any);
+      await interaction.editReply({
+        content: "(・∀・) Previous entries info sent via DM.",
+      });
+    } catch (error) {
+      console.error('Error showing previous entries:', error);
+      await interaction.editReply({
+        content: "(ಠ_ಠ) Error retrieving entries. Please try again.",
+      });
+    }
+  }
+
+  // Handle role selection interactions (legacy - for old select menu)
+  try {
+    await EntryService.handleRoleSelection(interaction);
+  } catch (error) {
+    console.error('Error handling role selection:', error);
   }
 });
+
+// Handle message commands (!entry and !prev)
+client.on("messageCreate", async (message: Message) => {
+  if (message.author.bot || !message.guild) return;
+
+  const content = message.content.trim().toLowerCase();
+
+  if (content === "!entry") {
+    const member = message.member;
+    if (!member) {
+      console.error('Member not found for entry command');
+      return;
+    }
+
+    try {
+      await EntryService.startEntry(member);
+    } catch (error) {
+      console.error('Error handling !entry command:', error);
+    }
+    return;
+  }
+
+  if (content === "!prev") {
+    const member = message.member;
+    if (!member) {
+      console.error('Member not found for prev command');
+      return;
+    }
+
+    try {
+      await EntryService.showPreviousEntries(member);
+    } catch (error) {
+      console.error('Error handling !prev command:', error);
+    }
+    return;
+  }
+
+  // Handle submissions in entry threads
+  try {
+    await EntryService.handleSubmission(message);
+  } catch (error) {
+    console.error('Error handling submission message:', error);
+  }
+});
+
+// Handle reaction events for role assignment
+client.on("messageReactionAdd", async (messageReaction, user) => {
+  try {
+    await EntryService.handleMessageReactionAdd(messageReaction, user);
+  } catch (error) {
+    console.error('Error handling message reaction add:', error);
+  }
+});
+
+// Cleanup expired sessions periodically
+setInterval(() => {
+  EntryService.cleanupExpiredSessions();
+}, 5 * 60 * 1000); // Every 5 minutes
 
 client.login(process.env.DISCORD_TOKEN);
