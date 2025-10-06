@@ -9,6 +9,7 @@ import {
   PermissionFlagsBits,
   StringSelectMenuBuilder,
   ActionRowBuilder,
+  Guild,
 } from 'discord.js';
 import { getUserGoals, getAllGoalDefinitions } from './goals';
 import { GoalDefinition } from '../types';
@@ -406,6 +407,14 @@ export class EntryService {
 
           // Lock the thread to prevent new messages (but keep it visible)
           await thread.setLocked(true);
+
+          // Update accountability status immediately when thread is locked
+          try {
+            await this.updateAccountabilityStatus(thread.guild);
+            console.log('Accountability status updated for completed entry');
+          } catch (error) {
+            console.error('Error updating accountability status after thread lock:', error);
+          }
         } catch (error) {
           console.error('Error completing thread:', error);
         }
@@ -630,7 +639,7 @@ export class EntryService {
             await member.roles.add(role);
             // Send ephemeral message to user
             try {
-              await user.send(`✅ Added **${goalDef.name}** goal to your roles!`);
+              await user.send(`Added **${goalDef.name}** goal to your roles.`);
             } catch (error) {
               console.error('Could not send DM to user:', error);
             }
@@ -668,6 +677,123 @@ export class EntryService {
 
     for (const userId of expiredSessions) {
       activeSessions.delete(userId);
+    }
+  }
+
+  // Accountability system variables
+  private static statusMessageId: string | null = null;
+  private static readonly STATUS_CHANNEL_ID = '1424172599197565109';
+
+  static async checkUserCompletionStatus(member: GuildMember): Promise<boolean> {
+    try {
+      const archiveChannelId = '1424342473198796961';
+      const archiveChannel = member.guild.channels.cache.get(archiveChannelId) as TextChannel;
+      const dayNumber = this.getCurrentDayNumber();
+      const displayName = member.displayName || member.user.username;
+
+      if (!archiveChannel) {
+        console.error('Archive channel not found for completion check');
+        return false;
+      }
+
+      // Look for an archived thread for this user and current day
+      // Pattern: archive-{displayName}-entry-day-{dayNumber}
+      const userThreads = archiveChannel.threads.cache.filter(thread => {
+        return thread.name === `archive-${displayName}-entry-day-${dayNumber}`;
+      });
+
+      if (userThreads.size === 0) {
+        return false; // No archived thread found for today
+      }
+
+      // If thread exists with archive- prefix, user has completed their entry
+      return true;
+
+    } catch (error) {
+      console.error('Error checking user completion status:', error);
+      return false;
+    }
+  }
+
+  static async updateAccountabilityStatus(guild: Guild): Promise<void> {
+    try {
+      const channel = await guild.channels.fetch(this.STATUS_CHANNEL_ID) as TextChannel;
+
+      if (!channel || !channel.isTextBased()) {
+        console.error('Status channel not found or not text-based:', this.STATUS_CHANNEL_ID);
+        return;
+      }
+
+      // Get all members who have challenge roles
+      const allMembers = await guild.members.fetch();
+      const challengeMembers = allMembers.filter(member => {
+        if (member.user.bot) return false;
+        const memberRoles = member.roles.cache.map(role => role.name.toLowerCase());
+        const userGoals = getUserGoals(memberRoles);
+        return userGoals.length > 0; // Has challenge goals
+      });
+
+      // Check completion status for each member
+      const memberStatuses: Array<{ member: GuildMember; completed: boolean }> = [];
+
+      for (const member of challengeMembers.values()) {
+        const completed = await this.checkUserCompletionStatus(member);
+        memberStatuses.push({ member, completed });
+      }
+
+      // Create status embed
+      const embed = new EmbedBuilder()
+        .setTitle(`Statuses - Day ${this.getCurrentDayNumber()}`)
+        .setDescription('View all participants below and their statuses.')
+        .setColor(0x0099FF)
+        .setTimestamp();
+
+      // Add fields for each member
+      for (const { member, completed } of memberStatuses) {
+        const displayName = member.displayName || member.user.username;
+        const statusEmoji = completed ? '✅' : '❌';
+        const statusText = completed ? 'Completed' : 'Not completed';
+
+        embed.addFields({
+          name: `${statusEmoji} ${displayName}`,
+          value: statusText,
+          inline: true,
+        });
+      }
+
+      // Update or send message
+      if (this.statusMessageId) {
+        try {
+          const message = await channel.messages.fetch(this.statusMessageId);
+          await message.edit({ embeds: [embed] });
+          console.log('Updated accountability status embed');
+        } catch (error) {
+          console.error('Error updating status message, will create new one:', error);
+          this.statusMessageId = null;
+        }
+      }
+
+      if (!this.statusMessageId) {
+        const message = await channel.send({ embeds: [embed] });
+        this.statusMessageId = message.id;
+        console.log('Created new accountability status embed');
+      }
+
+    } catch (error) {
+      console.error('Error updating accountability status:', error);
+    }
+  }
+
+  static async resetDailyStatus(): Promise<void> {
+    console.log('Resetting daily accountability status for new day');
+    this.statusMessageId = null;
+
+    try {
+      // Update status for the new day
+      const client = (await import('../index')).client;
+      await this.updateAccountabilityStatus(client.guilds.cache.first()!);
+    } catch (error) {
+      console.error('Error resetting daily status:', error);
     }
   }
 }

@@ -163,6 +163,13 @@ client.once("ready", async () => {
   // Initialize role selection message in channel 1424177763895607380
   await EntryService.createRoleSelectionMessage('1424177763895607380');
 
+  // Initialize accountability status
+  try {
+    await EntryService.updateAccountabilityStatus(client.guilds.cache.first()!);
+  } catch (error) {
+    console.error('Error initializing accountability status:', error);
+  }
+
   // Set bot status to online
   await updateBotStatus(true, 'Bot restarted and is now online');
 });
@@ -314,5 +321,29 @@ client.on("messageReactionAdd", async (messageReaction, user) => {
 setInterval(() => {
   EntryService.cleanupExpiredSessions();
 }, 5 * 60 * 1000); // Every 5 minutes
+
+// Daily reset at midnight for accountability status
+function scheduleDailyReset() {
+  const now = new Date();
+  const midnight = new Date();
+  midnight.setHours(24, 0, 0, 0); // Next midnight
+
+  const timeUntilMidnight = midnight.getTime() - now.getTime();
+
+  setTimeout(async () => {
+    try {
+      await EntryService.resetDailyStatus();
+      console.log('Daily accountability status reset completed');
+    } catch (error) {
+      console.error('Error during daily reset:', error);
+    }
+
+    // Schedule next reset for tomorrow
+    scheduleDailyReset();
+  }, timeUntilMidnight);
+}
+
+// Start the daily reset scheduler
+scheduleDailyReset();
 
 client.login(process.env.DISCORD_TOKEN);
