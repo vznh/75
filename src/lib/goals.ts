@@ -55,11 +55,11 @@ export const GOAL_DEFINITIONS: Record<string, GoalDefinition> = {
     requiresImage: true,
     requiresText: false,
   },
-  gym: {
-    name: 'Gym',
-    role: 'gym',
+  exercise: {
+    name: 'Exercise',
+    role: 'exercise',
     emoji: '🏋',
-    description: 'Submit what you did in the gym for today, as an image or text.',
+    description: 'Submit what you did for exercise today, as an image or text.',
     requiresImage: false,
     requiresText: true,
   },
@@ -79,6 +79,41 @@ export const GOAL_DEFINITIONS: Record<string, GoalDefinition> = {
     requiresImage: false,
     requiresText: true,
   },
+  'late-eats': {
+    name: 'Late Eating',
+    role: 'late-eats',
+    emoji: '🍽️',
+    description: 'Did you eat anything after 10PM yesterday? Submit a photo of what you ate or text describing it.',
+    requiresImage: false,
+    requiresText: true,
+  },
+};
+
+export const WEEKLY_GOAL_DEFINITIONS: Record<string, GoalDefinition> = {
+  cafe: {
+    name: 'Cafe',
+    role: 'cafe',
+    emoji: '☕',
+    description: 'Submit a picture of your coffee/cafe that you went to for the week.',
+    requiresImage: true,
+    requiresText: false,
+  },
+  portfolio: {
+    name: 'Portfolio',
+    role: 'portfolio',
+    emoji: '💼',
+    description: 'Submit proof of portfolio work done this week. This could be a screenshot of code, a design mockup, or description of what you built.',
+    requiresImage: false,
+    requiresText: true,
+  },
+  ternship: {
+    name: 'Internship',
+    role: 'ternship',
+    emoji: '🏢',
+    description: 'Submit proof of work done on your internship project this week. This could be a screenshot of code, a document, or description of what you accomplished.',
+    requiresImage: false,
+    requiresText: true,
+  },
 };
 
 export function getGoalDefinition(roleName: string): GoalDefinition | null {
@@ -87,6 +122,14 @@ export function getGoalDefinition(roleName: string): GoalDefinition | null {
 
 export function getAllGoalDefinitions(): GoalDefinition[] {
   return Object.values(GOAL_DEFINITIONS);
+}
+
+export function getAllWeeklyGoalDefinitions(): GoalDefinition[] {
+  return Object.values(WEEKLY_GOAL_DEFINITIONS);
+}
+
+export function getWeeklyGoalDefinition(roleName: string): GoalDefinition | null {
+  return WEEKLY_GOAL_DEFINITIONS[roleName.toLowerCase()] || null;
 }
 
 export function getUserGoals(memberRoles: string[]): GoalDefinition[] {
@@ -100,4 +143,33 @@ export function getUserGoals(memberRoles: string[]): GoalDefinition[] {
   }
 
   return userGoals;
+}
+
+export function getUserWeeklyGoals(memberRoles: string[]): GoalDefinition[] {
+  const userWeeklyGoals: GoalDefinition[] = [];
+
+  for (const roleName of memberRoles) {
+    const goalDef = getWeeklyGoalDefinition(roleName);
+    if (goalDef) {
+      userWeeklyGoals.push(goalDef);
+    }
+  }
+
+  return userWeeklyGoals;
+}
+
+export function getCurrentWeekNumber(): number {
+  const startDate = new Date('2025-10-06T00:00:00-07:00'); // PDT is UTC-7
+  const now = new Date();
+  const pdtNow = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+  
+  const diffTime = pdtNow.getTime() - startDate.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const weekNumber = Math.floor(diffDays / 7) + 1; // +1 because week 1 starts on day 0
+  
+  return Math.max(1, weekNumber);
+}
+
+export function isLastDayOfWeek(dayNumber: number): boolean {
+  return dayNumber % 7 === 0; // Days 7, 14, 21, etc. are the last day of each week
 }

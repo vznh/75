@@ -46,6 +46,9 @@ export interface EntrySession {
   channelId: string;
   dayNumber: number;
   goals: string[]; // Array of role names
+  weeklyGoals: string[]; // Array of weekly goal role names
   submissions: Map<string, GoalSubmission>; // goal name -> submission
+  weeklySubmissions: Map<string, GoalSubmission>; // weekly goal name -> submission
   goalMessages: Map<string, string>; // goal name -> message ID of the goal embed
+  weeklyGoalMessages: Map<string, string>; // weekly goal name -> message ID of the weekly goal embed
 }

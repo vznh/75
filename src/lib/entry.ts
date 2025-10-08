@@ -11,7 +11,7 @@ import {
   ActionRowBuilder,
   Guild,
 } from 'discord.js';
-import { getUserGoals, getAllGoalDefinitions } from './goals';
+import { getUserGoals, getAllGoalDefinitions, getUserWeeklyGoals, getAllWeeklyGoalDefinitions, getCurrentWeekNumber, isLastDayOfWeek } from './goals';
 import { GoalDefinition } from '../types';
 import { EntrySession, GoalSubmission } from '../types';
 
@@ -43,8 +43,9 @@ export class EntryService {
       // Get user's goals from their roles
       const memberRoles = member.roles.cache.map(role => role.name.toLowerCase());
       const userGoals = getUserGoals(memberRoles);
+      const userWeeklyGoals = getUserWeeklyGoals(memberRoles);
 
-      if (userGoals.length === 0) {
+      if (userGoals.length === 0 && userWeeklyGoals.length === 0) {
         console.error(`User ${displayName} has no challenge roles`);
         return;
       }
@@ -108,15 +109,18 @@ export class EntryService {
         channelId: thread.id,
         dayNumber: dayNumber,
         goals: userGoals.map(g => g.role),
+        weeklyGoals: userWeeklyGoals.map(g => g.role),
         submissions: new Map(),
+        weeklySubmissions: new Map(),
         goalMessages: new Map(),
+        weeklyGoalMessages: new Map(),
       };
 
       activeSessions.set(discordId, session);
 
       // Send initial embed with placeholders
       try {
-        await this.sendInitialEntryEmbed(thread, displayName, dayNumber, userGoals);
+        await this.sendInitialEntryEmbed(thread, displayName, dayNumber, userGoals, userWeeklyGoals);
       } catch (error) {
         console.error('Error sending initial embed:', error);
       }
@@ -128,6 +132,19 @@ export class EntryService {
           session.goalMessages.set(goalDef.role, message.id);
         } catch (error) {
           console.error(`Error sending goal embed for ${goalDef.name}:`, error);
+        }
+      }
+
+      // Send weekly goal embeds if it's the last day of the week or if weekly goals aren't completed
+      const shouldShowWeeklyGoals = isLastDayOfWeek(dayNumber) || this.hasIncompleteWeeklyGoals(session);
+      if (shouldShowWeeklyGoals && userWeeklyGoals.length > 0) {
+        for (const weeklyGoalDef of userWeeklyGoals) {
+          try {
+            const message = await this.sendWeeklyGoalEmbed(thread, weeklyGoalDef, dayNumber);
+            session.weeklyGoalMessages.set(weeklyGoalDef.role, message.id);
+          } catch (error) {
+            console.error(`Error sending weekly goal embed for ${weeklyGoalDef.name}:`, error);
+          }
         }
       }
     } catch (error) {
@@ -154,19 +171,34 @@ export class EntryService {
     }
   }
 
-  private static async sendInitialEntryEmbed(thread: ThreadChannel, displayName: string, dayNumber: number, userGoals: GoalDefinition[]): Promise<void> {
+  private static async sendInitialEntryEmbed(thread: ThreadChannel, displayName: string, dayNumber: number, userGoals: GoalDefinition[], userWeeklyGoals: GoalDefinition[]): Promise<void> {
     try {
+      let description = `\n\n(￣✓￣) ☑ . . . . your goals\n`;
+      
+      if (userGoals.length > 0) {
+        description += `${userGoals.map(goal => `${goal.emoji} ${goal.name}`).join('\n')}\n`;
+      }
+      
+      if (userWeeklyGoals.length > 0) {
+        const shouldShowWeeklyGoals = isLastDayOfWeek(dayNumber);
+        if (shouldShowWeeklyGoals) {
+          description += `\n📅 **Weekly Goals** (must complete today):\n`;
+          description += `${userWeeklyGoals.map(goal => `${goal.emoji} ${goal.name}`).join('\n')}\n`;
+        }
+      }
+      
+      description += `\n**Instructions**\n`;
+      description += `* Reply to each goal below with your submission - each goal has its own instructions\n`;
+      description += `* You can reply to any goal at any time\n`;
+      description += `* You can submit multiple times for the same goal, but one submission will count\n`;
+      
+      if (userWeeklyGoals.length > 0 && isLastDayOfWeek(dayNumber)) {
+        description += `* **Weekly goals must be completed by the end of the week (today)**\n`;
+      }
+
       const embed = new EmbedBuilder()
         .setTitle(`Day ${dayNumber}`)
-        .setDescription(
-          `\n\n` +
-          `(￣✓￣) ☑ . . . . your goals\n` +
-          `${userGoals.map(goal => `${goal.emoji} ${goal.name}`).join('\n')}\n\n` +
-          `**Instructions**\n` +
-          `* Reply to each goal below with your submission - each goal has its own instructions\n` +
-          `* You can reply to any goal at any time\n` +
-          `* You can submit multiple times for the same goal, but one submission will count`
-        )
+        .setDescription(description)
         .setColor(0x0099FF)
         .setTimestamp();
 
@@ -245,20 +277,45 @@ export class EntryService {
 
       // Detect which goal the user is replying to based on message reference
       let currentGoalName: string | null = null;
+      let isWeeklyGoal = false;
       
       if (message.reference?.messageId) {
         // User replied to a specific message, find which goal it is
         for (const [goalName, messageId] of session.goalMessages.entries()) {
           if (messageId === message.reference.messageId) {
             currentGoalName = goalName;
+            isWeeklyGoal = false;
             break;
+          }
+        }
+        
+        // Check weekly goals if not found in regular goals
+        if (!currentGoalName) {
+          for (const [goalName, messageId] of session.weeklyGoalMessages.entries()) {
+            if (messageId === message.reference.messageId) {
+              currentGoalName = goalName;
+              isWeeklyGoal = true;
+              break;
+            }
           }
         }
       }
 
       // If no reply reference, try to match by content or use first pending goal
-      if (!currentGoalName && pendingGoals.length > 0) {
-        currentGoalName = pendingGoals[0];
+      if (!currentGoalName) {
+        if (pendingGoals.length > 0) {
+          currentGoalName = pendingGoals[0];
+          isWeeklyGoal = false;
+        } else {
+          // Check for pending weekly goals
+          const pendingWeeklyGoals = session.weeklyGoals.filter(goalName => {
+            return !session.weeklySubmissions.has(goalName);
+          });
+          if (pendingWeeklyGoals.length > 0) {
+            currentGoalName = pendingWeeklyGoals[0];
+            isWeeklyGoal = true;
+          }
+        }
       }
 
       if (!currentGoalName) {
@@ -271,7 +328,8 @@ export class EntryService {
       }
 
       // Check if this goal was already submitted
-      if (session.submissions.has(currentGoalName)) {
+      const submissionsMap = isWeeklyGoal ? session.weeklySubmissions : session.submissions;
+      if (submissionsMap.has(currentGoalName)) {
         try {
           await channel.send('(・_・) You already submitted this goal. First submission counts!');
         } catch (error) {
@@ -280,7 +338,9 @@ export class EntryService {
         return;
       }
 
-      const goalDef = getUserGoals([currentGoalName])[0];
+      const goalDef = isWeeklyGoal 
+        ? getUserWeeklyGoals([currentGoalName])[0]
+        : getUserGoals([currentGoalName])[0];
 
       if (!goalDef) {
         try {
@@ -342,7 +402,11 @@ export class EntryService {
         isValid: true,
       };
 
-      session.submissions.set(goalDef.role, goalSubmission);
+      if (isWeeklyGoal) {
+        session.weeklySubmissions.set(goalDef.role, goalSubmission);
+      } else {
+        session.submissions.set(goalDef.role, goalSubmission);
+      }
 
       // Send confirmation
       try {
@@ -354,8 +418,17 @@ export class EntryService {
       // Check if all goals are complete
       const completedGoals = session.submissions.size;
       const totalGoals = session.goals.length;
+      const completedWeeklyGoals = session.weeklySubmissions.size;
+      const totalWeeklyGoals = session.weeklyGoals.length;
+      
+      // Check if it's the last day of the week and weekly goals are required
+      const isLastDay = isLastDayOfWeek(session.dayNumber);
+      const weeklyGoalsRequired = isLastDay && totalWeeklyGoals > 0;
+      const weeklyGoalsComplete = completedWeeklyGoals >= totalWeeklyGoals;
 
-      if (completedGoals >= totalGoals) {
+      const allGoalsComplete = completedGoals >= totalGoals && (!weeklyGoalsRequired || weeklyGoalsComplete);
+
+      if (allGoalsComplete) {
         try {
           await this.completeEntry(session);
         } catch (error) {
@@ -369,8 +442,19 @@ export class EntryService {
           return goalDef ? goalDef.name : goalName;
         });
 
+        let message = `📋 **${totalGoals - completedGoals} goal${totalGoals - completedGoals > 1 ? 's' : ''} remaining:** ${missingGoalNames.join(', ')}`;
+        
+        if (weeklyGoalsRequired && !weeklyGoalsComplete) {
+          const missingWeeklyGoals = session.weeklyGoals.filter(goalName => !session.weeklySubmissions.has(goalName));
+          const missingWeeklyGoalNames = missingWeeklyGoals.map(goalName => {
+            const goalDef = getUserWeeklyGoals([goalName])[0];
+            return goalDef ? goalDef.name : goalName;
+          });
+          message += `\n📅 **${totalWeeklyGoals - completedWeeklyGoals} weekly goal${totalWeeklyGoals - completedWeeklyGoals > 1 ? 's' : ''} remaining:** ${missingWeeklyGoalNames.join(', ')}`;
+        }
+
         try {
-          await channel.send(`📋 **${totalGoals - completedGoals} goal${totalGoals - completedGoals > 1 ? 's' : ''} remaining:** ${missingGoalNames.join(', ')}`);
+          await channel.send(message);
         } catch (error) {
           console.error('Error sending remaining goals message:', error);
         }
@@ -546,11 +630,24 @@ export class EntryService {
       }
 
       const allGoals = getAllGoalDefinitions();
+      const allWeeklyGoals = getAllWeeklyGoalDefinitions();
 
       let description = 'React with the emoji to add the goal to your entries.\n\n';
 
-      for (const goal of allGoals) {
-        description += `${goal.emoji} **${goal.name}** - ${goal.description}\n`;
+      if (allGoals.length > 0) {
+        description += '**Daily Goals**\n';
+        for (const goal of allGoals) {
+          description += `${goal.emoji} **${goal.name}** - ${goal.description}\n`;
+        }
+        description += '\n';
+      }
+
+      if (allWeeklyGoals.length > 0) {
+        description += '**Weekly Goals**\n';
+        for (const goal of allWeeklyGoals) {
+          description += `${goal.emoji} **${goal.name}** - ${goal.description}\n`;
+        }
+        description += '\n';
       }
 
       const embed = new EmbedBuilder()
@@ -561,7 +658,17 @@ export class EntryService {
 
       const message = await channel.send({ embeds: [embed] });
 
+      // Add reactions for daily goals
       for (const goal of allGoals) {
+        try {
+          await message.react(goal.emoji);
+        } catch (error) {
+          console.error(`Error adding reaction ${goal.emoji} for ${goal.name}:`, error);
+        }
+      }
+
+      // Add reactions for weekly goals
+      for (const goal of allWeeklyGoals) {
         try {
           await message.react(goal.emoji);
         } catch (error) {
@@ -590,7 +697,13 @@ export class EntryService {
 
       // Find the goal that matches this emoji
       const allGoals = getAllGoalDefinitions();
-      const goalDef = allGoals.find(goal => goal.emoji === emoji);
+      const allWeeklyGoals = getAllWeeklyGoalDefinitions();
+      let goalDef = allGoals.find(goal => goal.emoji === emoji);
+      
+      // Check weekly goals if not found in daily goals
+      if (!goalDef) {
+        goalDef = allWeeklyGoals.find(goal => goal.emoji === emoji);
+      }
 
       if (!goalDef) {
         console.error(`No goal found for emoji: ${emoji}`);
@@ -830,6 +943,7 @@ export class EntryService {
 
       // Get all goal definitions
       const allGoals = getAllGoalDefinitions();
+      const allWeeklyGoals = getAllWeeklyGoalDefinitions();
 
       for (const goalDef of allGoals) {
         const roleName = goalDef.role;
@@ -869,11 +983,87 @@ export class EntryService {
         }
       }
 
+      // Create weekly goal roles
+      for (const goalDef of allWeeklyGoals) {
+        const roleName = goalDef.role;
+        const emoji = goalDef.emoji;
+
+        try {
+          // Check if role already exists
+          let role = guild.roles.cache.find(r => r.name.toLowerCase() === roleName.toLowerCase());
+
+          if (!role) {
+            // Create the role if it doesn't exist
+            console.log(`Creating weekly role: ${roleName} with emoji: ${emoji}`);
+
+            role = await guild.roles.create({
+              name: roleName,
+              color: this.getGoalColor(roleName),
+              reason: `Auto-created role for ${goalDef.name} weekly challenge goal`,
+              mentionable: true,
+            });
+
+            console.log(`✅ Created weekly role: ${roleName}`);
+          } else {
+            console.log(`✅ Weekly role already exists: ${roleName}`);
+          }
+
+          // Ensure the role has the correct color
+          if (role.color !== this.getGoalColor(roleName)) {
+            await role.edit({
+              color: this.getGoalColor(roleName),
+              reason: 'Updating weekly role color to match goal definition'
+            });
+            console.log(`🎨 Updated color for weekly role: ${roleName}`);
+          }
+
+        } catch (error) {
+          console.error(`❌ Error handling weekly role ${roleName}:`, error);
+        }
+      }
+
       console.log('✅ Role check and creation completed');
 
     } catch (error) {
       console.error('Error ensuring roles exist:', error);
     }
+  }
+
+  private static async sendWeeklyGoalEmbed(thread: ThreadChannel, goalDef: GoalDefinition, dayNumber: number): Promise<Message> {
+    try {
+      const embed = new EmbedBuilder()
+        .setTitle(`📅 ${goalDef.emoji} ${goalDef.name} (Weekly)`)
+        .setDescription(goalDef.description)
+        .setColor(this.getGoalColor(goalDef.role))
+        .addFields({
+          name: 'Weekly Goal',
+          value: `This is a weekly goal. ${isLastDayOfWeek(dayNumber) ? '**Must be completed today!**' : 'Complete anytime this week.'}`,
+          inline: false,
+        });
+
+      // Add requirements
+      const requirements = [];
+      if (goalDef.requiresImage) requirements.push('📷 Image');
+      if (goalDef.requiresText) requirements.push('📝 Text');
+
+      if (requirements.length > 0) {
+        embed.addFields({
+          name: 'Required',
+          value: requirements.join(' or '),
+          inline: false,
+        });
+      }
+
+      return await thread.send({ embeds: [embed] });
+    } catch (error) {
+      console.error(`Error sending weekly goal embed for ${goalDef.name}:`, error);
+      throw error;
+    }
+  }
+
+  private static hasIncompleteWeeklyGoals(session: EntrySession): boolean {
+    // Check if any weekly goals haven't been completed yet
+    return session.weeklyGoals.some(goalName => !session.weeklySubmissions.has(goalName));
   }
 
   private static getGoalColor(roleName: string): number {
@@ -884,9 +1074,13 @@ export class EntryService {
       'work': 0x32CD32, // Green
       'food': 0xFF6347, // Tomato
       'job applications': 0xFFD700, // Gold
-      'gym': 0xDC143C, // Crimson
+      'exercise': 0xDC143C, // Crimson
       'dj': 0xFF69B4, // Hot Pink
       'reading': 0x8B4513, // Saddle Brown
+      'cafe': 0x8B4513, // Saddle Brown for cafe
+      'late-eats': 0xFF4500, // Orange Red for late eating
+      'portfolio': 0x4169E1, // Royal Blue for portfolio
+      'ternship': 0x228B22, // Forest Green for internship
     };
     return colors[roleName] || 0x0099FF; // Default blue
   }
@@ -1094,5 +1288,101 @@ export class EntryService {
     } catch (error) {
       console.error('❌ Error during force refresh:', error);
     }
+  }
+
+  // Reminder system for incomplete goals
+  static async sendGoalReminders(guild: Guild, isLastCall: boolean = false): Promise<void> {
+    try {
+      const channel = await guild.channels.fetch(this.STATUS_CHANNEL_ID) as TextChannel;
+
+      if (!channel || !channel.isTextBased()) {
+        console.error('Status channel not found or not text-based:', this.STATUS_CHANNEL_ID);
+        return;
+      }
+
+      // Get all members who have challenge roles
+      const allMembers = await guild.members.fetch();
+      const challengeMembers = allMembers.filter(member => {
+        if (member.user.bot) return false;
+        const memberRoles = member.roles.cache.map(role => role.name.toLowerCase());
+        const userGoals = getUserGoals(memberRoles);
+        const userWeeklyGoals = getUserWeeklyGoals(memberRoles);
+        return userGoals.length > 0 || userWeeklyGoals.length > 0; // Has challenge goals
+      });
+
+      // Find members who haven't completed their goals
+      const incompleteMembers: GuildMember[] = [];
+
+      for (const member of challengeMembers.values()) {
+        const isCompleted = await this.checkUserCompletionStatus(member);
+        if (!isCompleted) {
+          incompleteMembers.push(member);
+        }
+      }
+
+      if (incompleteMembers.length === 0) {
+        console.log('All members have completed their goals for today');
+        return;
+      }
+
+      // Create individual pings
+      const individualPings = incompleteMembers.map(member => `<@${member.id}>`).join(' ');
+
+      // Send reminder message
+      const message = isLastCall 
+        ? `${individualPings} last call to finish entries!`
+        : `${individualPings} hasn't finished their goal yet!`;
+
+      await channel.send(message);
+      console.log(`✅ Sent ${isLastCall ? 'last call' : 'reminder'} message to ${incompleteMembers.length} members`);
+
+    } catch (error) {
+      console.error('Error sending goal reminders:', error);
+    }
+  }
+
+  // Schedule reminders for 11:00 PM and 11:30 PM PDT
+  static scheduleGoalReminders(): void {
+    console.log('📅 Scheduling goal completion reminders...');
+
+    // Schedule 11:00 PM reminder
+    this.scheduleReminder(23, 0, false); // 11:00 PM
+
+    // Schedule 11:30 PM reminder
+    this.scheduleReminder(23, 30, true); // 11:30 PM (last call)
+  }
+
+  private static scheduleReminder(hour: number, minute: number, isLastCall: boolean): void {
+    const now = new Date();
+    const pdtNow = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+    
+    // Create target time for today
+    const targetTime = new Date(pdtNow);
+    targetTime.setHours(hour, minute, 0, 0);
+
+    // If the time has already passed today, schedule for tomorrow
+    if (targetTime <= pdtNow) {
+      targetTime.setDate(targetTime.getDate() + 1);
+    }
+
+    const timeUntilReminder = targetTime.getTime() - pdtNow.getTime();
+
+    setTimeout(async () => {
+      try {
+        const client = (await import('../index')).client;
+        const guild = client.guilds.cache.first();
+        if (guild) {
+          await this.sendGoalReminders(guild, isLastCall);
+        }
+      } catch (error) {
+        console.error(`Error sending ${isLastCall ? 'last call' : 'reminder'} reminder:`, error);
+      }
+
+      // Schedule next day's reminder
+      this.scheduleReminder(hour, minute, isLastCall);
+    }, timeUntilReminder);
+
+    const reminderType = isLastCall ? 'last call' : 'reminder';
+    console.log(`⏰ Scheduled ${reminderType} for ${targetTime.toLocaleString("en-US", {timeZone: "America/Los_Angeles"})}`);
   }
 }

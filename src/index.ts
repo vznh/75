@@ -187,6 +187,13 @@ client.once("ready", async () => {
     console.error('Error initializing history embed:', error);
   }
 
+  // Initialize goal reminder scheduler
+  try {
+    EntryService.scheduleGoalReminders();
+  } catch (error) {
+    console.error('Error initializing goal reminders:', error);
+  }
+
   // Set bot status to online
   await updateBotStatus(true, 'Bot restarted and is now online');
 });
@@ -333,6 +340,28 @@ client.on("messageCreate", async (message: Message) => {
     } catch (error) {
       console.error('Error handling !day command:', error);
       await message.reply('❌ Error getting day info. Check console for details.');
+    }
+    return;
+  }
+
+  if (content === "!remind") {
+    try {
+      await EntryService.sendGoalReminders(message.guild!, false);
+      await message.reply('✅ Reminder sent!');
+    } catch (error) {
+      console.error('Error handling !remind command:', error);
+      await message.reply('❌ Error sending reminder. Check console for details.');
+    }
+    return;
+  }
+
+  if (content === "!lastcall") {
+    try {
+      await EntryService.sendGoalReminders(message.guild!, true);
+      await message.reply('✅ Last call reminder sent!');
+    } catch (error) {
+      console.error('Error handling !lastcall command:', error);
+      await message.reply('❌ Error sending last call. Check console for details.');
     }
     return;
   }
