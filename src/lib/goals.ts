@@ -69,7 +69,7 @@ export const GOAL_DEFINITIONS: Record<string, GoalDefinition> = {
     emoji: '🎧',
     description: 'Submit your audio file of your DJ mix for today.',
     requiresImage: false,
-    requiresText: true,
+    requiresText: false,
   },
   reading: {
     name: 'Reading',
@@ -101,7 +101,7 @@ export const WEEKLY_GOAL_DEFINITIONS: Record<string, GoalDefinition> = {
   portfolio: {
     name: 'Portfolio',
     role: 'portfolio',
-    emoji: '💼',
+    emoji: '',
     description: 'Submit proof of portfolio work done this week. This could be a screenshot of code, a design mockup, or description of what you built.',
     requiresImage: false,
     requiresText: true,
@@ -117,7 +117,18 @@ export const WEEKLY_GOAL_DEFINITIONS: Record<string, GoalDefinition> = {
 };
 
 export function getGoalDefinition(roleName: string): GoalDefinition | null {
-  return GOAL_DEFINITIONS[roleName.toLowerCase()] || null;
+  // First try direct lookup
+  let goalDef = GOAL_DEFINITIONS[roleName.toLowerCase()];
+  if (goalDef) return goalDef;
+  
+  // If not found, search by role property
+  for (const [key, definition] of Object.entries(GOAL_DEFINITIONS)) {
+    if (definition.role.toLowerCase() === roleName.toLowerCase()) {
+      return definition;
+    }
+  }
+  
+  return null;
 }
 
 export function getAllGoalDefinitions(): GoalDefinition[] {
@@ -129,7 +140,18 @@ export function getAllWeeklyGoalDefinitions(): GoalDefinition[] {
 }
 
 export function getWeeklyGoalDefinition(roleName: string): GoalDefinition | null {
-  return WEEKLY_GOAL_DEFINITIONS[roleName.toLowerCase()] || null;
+  // First try direct lookup
+  let goalDef = WEEKLY_GOAL_DEFINITIONS[roleName.toLowerCase()];
+  if (goalDef) return goalDef;
+  
+  // If not found, search by role property
+  for (const [key, definition] of Object.entries(WEEKLY_GOAL_DEFINITIONS)) {
+    if (definition.role.toLowerCase() === roleName.toLowerCase()) {
+      return definition;
+    }
+  }
+  
+  return null;
 }
 
 export function getUserGoals(memberRoles: string[]): GoalDefinition[] {

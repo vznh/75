@@ -220,6 +220,11 @@ export class EntryService {
       const requirements = [];
       if (goalDef.requiresImage) requirements.push('📷 Image');
       if (goalDef.requiresText) requirements.push('📝 Text');
+      
+      // Special handling for DJ goal
+      if (goalDef.role === 'dj') {
+        requirements.push('📎 File (any type)');
+      }
 
       if (requirements.length > 0) {
         embed.addFields({
@@ -356,26 +361,39 @@ export class EntryService {
       let submissionContent: string | undefined;
       let mediaUrl: string | undefined;
 
-      if (goalDef.requiresText && content) {
-        submissionContent = content;
-        if (goalDef.validation) {
-          isValid = goalDef.validation(content, hasImage);
-        } else {
-          isValid = content.length > 0;
-        }
-      }
-
-      if (goalDef.requiresImage && hasImage) {
-        mediaUrl = message.attachments.first()?.url;
-        isValid = true;
-      }
-
-      // For goals that accept either text or image
-      if (!goalDef.requiresText && !goalDef.requiresImage) {
-        if (content || hasImage) {
+      // Special handling for DJ goal - accept any file type
+      if (goalDef.role === 'dj') {
+        if (message.attachments.size > 0) {
+          isValid = true;
+          mediaUrl = message.attachments.first()?.url;
+          submissionContent = content; // Include any text description if provided
+        } else if (content) {
           isValid = true;
           submissionContent = content;
-          if (hasImage) mediaUrl = message.attachments.first()?.url;
+        }
+      } else {
+        // Regular validation for other goals
+        if (goalDef.requiresText && content) {
+          submissionContent = content;
+          if (goalDef.validation) {
+            isValid = goalDef.validation(content, hasImage);
+          } else {
+            isValid = content.length > 0;
+          }
+        }
+
+        if (goalDef.requiresImage && hasImage) {
+          mediaUrl = message.attachments.first()?.url;
+          isValid = true;
+        }
+
+        // For goals that accept either text or image
+        if (!goalDef.requiresText && !goalDef.requiresImage) {
+          if (content || hasImage) {
+            isValid = true;
+            submissionContent = content;
+            if (hasImage) mediaUrl = message.attachments.first()?.url;
+          }
         }
       }
 
@@ -383,6 +401,11 @@ export class EntryService {
         const requirements = [];
         if (goalDef.requiresText) requirements.push('text');
         if (goalDef.requiresImage) requirements.push('image');
+        
+        // Special handling for DJ goal
+        if (goalDef.role === 'dj') {
+          requirements.push('file');
+        }
 
         try {
           await channel.send(
