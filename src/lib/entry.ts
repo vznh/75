@@ -19,10 +19,19 @@ const activeSessions = new Map<string, EntrySession>();
 
 export class EntryService {
   static getCurrentDayNumber(): number {
-    const startDate = new Date('2025-10-06');
-    const today = new Date();
-    const diffTime = today.getTime() - startDate.getTime();
+    // Set start date to October 6th, 2025 at midnight PDT
+    const startDate = new Date('2025-10-06T00:00:00-07:00'); // PDT is UTC-7
+    
+    // Get current date in PDT
+    const now = new Date();
+    const pdtNow = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+    
+    // Calculate difference in days
+    const diffTime = pdtNow.getTime() - startDate.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 because Oct 6th is day 1
+    
+    console.log(`Date calculation: Start=${startDate.toISOString()}, Now=${pdtNow.toISOString()}, DiffDays=${diffDays}`);
+    
     return Math.max(1, diffDays); // Ensure minimum day 1
   }
 
@@ -195,18 +204,6 @@ export class EntryService {
     }
   }
 
-  private static getGoalColor(roleName: string): number {
-    const colors: Record<string, number> = {
-      'leetcode': 0xFFA500, // Orange
-      'water': 0x0099FF, // Blue
-      'sleep': 0x9932CC, // Purple
-      'work': 0x32CD32, // Green
-      'food': 0xFF6347, // Tomato
-      'job applications': 0xFFD700, // Gold
-      'gym': 0xDC143C, // Crimson
-    };
-    return colors[roleName] || 0x0099FF; // Default blue
-  }
 
   static async handleSubmission(message: Message): Promise<void> {
     if (!message.inGuild() || message.author.bot) return;
@@ -402,19 +399,27 @@ export class EntryService {
           // Rename thread to prepend with archive-
           const newName = `archive-${thread.name}`;
           await thread.setName(newName);
+          console.log(`Renamed thread to: ${newName}`);
 
           await thread.send(`**You complete your entry for ${displayName}!**\n\nThread is now read-only and archived.`);
 
           // Lock the thread to prevent new messages (but keep it visible)
           await thread.setLocked(true);
+          console.log(`Locked thread: ${newName}`);
 
-          // Update accountability status immediately when thread is locked
+          // Refresh thread cache to ensure we have the latest data
           try {
-            await this.updateAccountabilityStatus(thread.guild);
-            console.log('Accountability status updated for completed entry');
+            await thread.parent?.threads.fetch();
+            console.log('Refreshed thread cache');
           } catch (error) {
-            console.error('Error updating accountability status after thread lock:', error);
+            console.error('Error refreshing thread cache:', error);
           }
+
+          // Update accountability status with retry mechanism
+          await this.updateStatusWithRetry(thread.guild, displayName, 3);
+
+          // Update history embed with retry mechanism
+          await this.updateHistoryWithRetry(thread.guild, displayName, 3);
         } catch (error) {
           console.error('Error completing thread:', error);
         }
@@ -682,6 +687,7 @@ export class EntryService {
 
   // Accountability system variables
   private static statusMessageId: string | null = null;
+  private static historyMessageId: string | null = null;
   private static readonly STATUS_CHANNEL_ID = '1424172599197565109';
 
   static async checkUserCompletionStatus(member: GuildMember): Promise<boolean> {
@@ -696,11 +702,29 @@ export class EntryService {
         return false;
       }
 
+      // Refresh thread cache to ensure we have the latest data
+      try {
+        await archiveChannel.threads.fetch();
+        console.log(`Refreshed thread cache for completion check of ${displayName}`);
+      } catch (error) {
+        console.error('Error refreshing thread cache for completion check:', error);
+        // Continue with cached data if refresh fails
+      }
+
       // Look for an archived thread for this user and current day
       // Pattern: archive-{displayName}-entry-day-{dayNumber}
+      const expectedThreadName = `archive-${displayName}-entry-day-${dayNumber}`;
+      console.log(`Looking for thread: ${expectedThreadName}`);
+      
       const userThreads = archiveChannel.threads.cache.filter(thread => {
-        return thread.name === `archive-${displayName}-entry-day-${dayNumber}`;
+        const matches = thread.name === expectedThreadName;
+        if (matches) {
+          console.log(`Found matching thread: ${thread.name} (locked: ${thread.locked})`);
+        }
+        return matches;
       });
+
+      console.log(`Thread search result for ${displayName}: ${userThreads.size} threads found`);
 
       if (userThreads.size === 0) {
         return false; // No archived thread found for today
@@ -743,8 +767,8 @@ export class EntryService {
 
       // Create status embed
       const embed = new EmbedBuilder()
-        .setTitle(`Statuses - Day ${this.getCurrentDayNumber()}`)
-        .setDescription('View all participants below and their statuses.')
+        .setTitle("Statuses")
+        .setDescription('View all participants below and their statuses for today.')
         .setColor(0x0099FF)
         .setTimestamp();
 
@@ -792,6 +816,9 @@ export class EntryService {
       // Update status for the new day
       const client = (await import('../index')).client;
       await this.updateAccountabilityStatus(client.guilds.cache.first()!);
+      
+      // Update history for the new day
+      await this.updateHistoryEmbed(client.guilds.cache.first()!);
     } catch (error) {
       console.error('Error resetting daily status:', error);
     }
@@ -862,5 +889,210 @@ export class EntryService {
       'reading': 0x8B4513, // Saddle Brown
     };
     return colors[roleName] || 0x0099FF; // Default blue
+  }
+
+  static async updateHistoryEmbed(guild: Guild): Promise<void> {
+    try {
+      const channel = await guild.channels.fetch(this.STATUS_CHANNEL_ID) as TextChannel;
+
+      if (!channel || !channel.isTextBased()) {
+        console.error('Status channel not found or not text-based:', this.STATUS_CHANNEL_ID);
+        return;
+      }
+
+      // Get all members who have challenge roles
+      const allMembers = await guild.members.fetch();
+      const challengeMembers = allMembers.filter(member => {
+        if (member.user.bot) return false;
+        const memberRoles = member.roles.cache.map(role => role.name.toLowerCase());
+        const userGoals = getUserGoals(memberRoles);
+        return userGoals.length > 0; // Has challenge goals
+      });
+
+      // Reconstruct history from archived threads
+      const historyData = await this.reconstructHistoryFromThreads(guild, challengeMembers);
+
+      // Create history embed
+      const embed = new EmbedBuilder()
+        .setTitle("History")
+        .setDescription(this.formatHistoryData(historyData))
+        .setColor(0x0099FF)
+        .setTimestamp();
+
+      // Update or send message
+      if (this.historyMessageId) {
+        try {
+          const message = await channel.messages.fetch(this.historyMessageId);
+          await message.edit({ embeds: [embed] });
+          console.log('Updated history embed');
+        } catch (error) {
+          console.error('Error updating history message, will create new one:', error);
+          this.historyMessageId = null;
+        }
+      }
+
+      if (!this.historyMessageId) {
+        const message = await channel.send({ embeds: [embed] });
+        this.historyMessageId = message.id;
+        console.log('Created new history embed');
+      }
+
+    } catch (error) {
+      console.error('Error updating history embed:', error);
+    }
+  }
+
+  private static async reconstructHistoryFromThreads(guild: Guild, challengeMembers: any): Promise<Map<number, { completed: string[], incomplete: string[] }>> {
+    const historyData = new Map<number, { completed: string[], incomplete: string[] }>();
+    
+    try {
+      const archiveChannelId = '1424342473198796961';
+      const archiveChannel = guild.channels.cache.get(archiveChannelId) as TextChannel;
+
+      if (!archiveChannel) {
+        console.error('Archive channel not found for history reconstruction');
+        return historyData;
+      }
+
+      // Get current day number to determine how many days to check
+      const currentDay = this.getCurrentDayNumber();
+
+      // For each day from 1 to current day
+      for (let day = 1; day <= currentDay; day++) {
+        const completed: string[] = [];
+        const incomplete: string[] = [];
+
+        // Check each challenge member for completion on this day
+        for (const member of challengeMembers.values()) {
+          const displayName = member.displayName || member.user.username;
+          
+          // Look for archived thread for this user and day
+          const userThreads = archiveChannel.threads.cache.filter(thread => {
+            return thread.name === `archive-${displayName}-entry-day-${day}`;
+          });
+
+          if (userThreads.size > 0) {
+            completed.push(displayName);
+          } else {
+            incomplete.push(displayName);
+          }
+        }
+
+        historyData.set(day, { completed, incomplete });
+      }
+
+    } catch (error) {
+      console.error('Error reconstructing history from threads:', error);
+    }
+
+    return historyData;
+  }
+
+  private static formatHistoryData(historyData: Map<number, { completed: string[], incomplete: string[] }>): string {
+    let formattedHistory = '';
+
+    // Sort days in ascending order
+    const sortedDays = Array.from(historyData.keys()).sort((a, b) => a - b);
+
+    for (const day of sortedDays) {
+      const dayData = historyData.get(day);
+      if (!dayData) continue;
+
+      formattedHistory += `**Day ${day}**\n`;
+      
+      if (dayData.completed.length > 0) {
+        formattedHistory += `C: ${dayData.completed.join(', ')}\n`;
+      } else {
+        formattedHistory += `C: (none)\n`;
+      }
+      
+      if (dayData.incomplete.length > 0) {
+        formattedHistory += `IC: ${dayData.incomplete.join(', ')}\n`;
+      } else {
+        formattedHistory += `IC: (none)\n`;
+      }
+      
+      formattedHistory += '\n';
+    }
+
+    // Wrap in code block
+    return `\`\`\`\n${formattedHistory.trim()}\n\`\`\``;
+  }
+
+  private static async updateStatusWithRetry(guild: Guild, displayName: string, maxRetries: number): Promise<void> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Attempting status update (attempt ${attempt}/${maxRetries}) for ${displayName}`);
+        
+        // Verify the user's completion status before updating
+        const member = await guild.members.fetch({ query: displayName, limit: 1 }).then(members => members.first());
+        if (!member) {
+          console.error(`Member not found for ${displayName}`);
+          continue;
+        }
+
+        const isCompleted = await this.checkUserCompletionStatus(member);
+        console.log(`Completion status for ${displayName}: ${isCompleted}`);
+
+        if (isCompleted) {
+          await this.updateAccountabilityStatus(guild);
+          console.log(`✅ Status updated successfully for ${displayName} (attempt ${attempt})`);
+          return;
+        } else {
+          console.log(`❌ User ${displayName} not showing as completed yet (attempt ${attempt})`);
+          if (attempt < maxRetries) {
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          }
+        }
+      } catch (error) {
+        console.error(`Error updating status for ${displayName} (attempt ${attempt}):`, error);
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+      }
+    }
+    console.error(`Failed to update status for ${displayName} after ${maxRetries} attempts`);
+  }
+
+  private static async updateHistoryWithRetry(guild: Guild, displayName: string, maxRetries: number): Promise<void> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Attempting history update (attempt ${attempt}/${maxRetries}) for ${displayName}`);
+        
+        await this.updateHistoryEmbed(guild);
+        console.log(`✅ History updated successfully for ${displayName} (attempt ${attempt})`);
+        return;
+      } catch (error) {
+        console.error(`Error updating history for ${displayName} (attempt ${attempt}):`, error);
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+      }
+    }
+    console.error(`Failed to update history for ${displayName} after ${maxRetries} attempts`);
+  }
+
+  // Manual refresh method for debugging
+  static async forceRefreshStatus(guild: Guild): Promise<void> {
+    try {
+      console.log('🔄 Force refreshing status and history...');
+      
+      // Refresh thread cache
+      const archiveChannelId = '1424342473198796961';
+      const archiveChannel = guild.channels.cache.get(archiveChannelId) as TextChannel;
+      if (archiveChannel) {
+        await archiveChannel.threads.fetch();
+        console.log('✅ Thread cache refreshed');
+      }
+      
+      // Update both status and history
+      await this.updateAccountabilityStatus(guild);
+      await this.updateHistoryEmbed(guild);
+      
+      console.log('✅ Force refresh completed');
+    } catch (error) {
+      console.error('❌ Error during force refresh:', error);
+    }
   }
 }

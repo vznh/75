@@ -123,7 +123,7 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
   gracefulShutdown('unhandledRejection');
 });
-config();
+config({ path: '.env.local' });
 
 export const client = new Client({
   intents: [
@@ -178,6 +178,13 @@ client.once("ready", async () => {
     await EntryService.updateAccountabilityStatus(client.guilds.cache.first()!);
   } catch (error) {
     console.error('Error initializing accountability status:', error);
+  }
+
+  // Initialize history embed
+  try {
+    await EntryService.updateHistoryEmbed(client.guilds.cache.first()!);
+  } catch (error) {
+    console.error('Error initializing history embed:', error);
   }
 
   // Set bot status to online
@@ -266,12 +273,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // Handle role selection interactions (legacy - for old select menu)
-  try {
-    await EntryService.handleRoleSelection(interaction);
-  } catch (error) {
-    console.error('Error handling role selection:', error);
-  }
+  // Role selection is now handled via reactions in handleMessageReactionAdd
 });
 
 // Handle message commands (!entry and !prev)
@@ -306,6 +308,31 @@ client.on("messageCreate", async (message: Message) => {
       await EntryService.showPreviousEntries(member);
     } catch (error) {
       console.error('Error handling !prev command:', error);
+    }
+    return;
+  }
+
+  if (content === "!refresh") {
+    try {
+      await EntryService.forceRefreshStatus(message.guild!);
+      await message.reply('✅ Status and history refreshed!');
+    } catch (error) {
+      console.error('Error handling !refresh command:', error);
+      await message.reply('❌ Error refreshing status. Check console for details.');
+    }
+    return;
+  }
+
+  if (content === "!day") {
+    try {
+      const dayNumber = EntryService.getCurrentDayNumber();
+      const now = new Date();
+      const pdtNow = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+      
+      await message.reply(`📅 **Current Day:** ${dayNumber}\n🕐 **PDT Time:** ${pdtNow.toLocaleString()}\n📆 **Date:** ${pdtNow.toDateString()}`);
+    } catch (error) {
+      console.error('Error handling !day command:', error);
+      await message.reply('❌ Error getting day info. Check console for details.');
     }
     return;
   }
