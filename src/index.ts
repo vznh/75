@@ -278,6 +278,24 @@ client.on("interactionCreate", async (interaction) => {
         content: "(ಠ_ಠ) Error retrieving entries. Please try again.",
       });
     }
+  } else if (interaction.customId.startsWith("share_thread_")) {
+    // Defer reply immediately to prevent interaction timeout
+    await interaction.deferReply({ ephemeral: true });
+
+    const threadId = interaction.customId.replace("share_thread_", "");
+    const userId = interaction.user.id;
+
+    try {
+      await EntryService.shareThread(threadId, userId);
+      await interaction.editReply({
+        content: "(・∀・) Thread shared successfully!",
+      });
+    } catch (error) {
+      console.error('Error sharing thread:', error);
+      await interaction.editReply({
+        content: "(ಠ_ಠ) Error sharing thread. Please try again.",
+      });
+    }
   }
 
   // Role selection is now handled via reactions in handleMessageReactionAdd

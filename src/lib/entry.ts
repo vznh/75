@@ -9,6 +9,8 @@ import {
   PermissionFlagsBits,
   StringSelectMenuBuilder,
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Guild,
 } from 'discord.js';
 import { getUserGoals, getAllGoalDefinitions, getUserWeeklyGoals, getAllWeeklyGoalDefinitions, getCurrentWeekNumber, isLastDayOfWeek } from './goals';
@@ -508,11 +510,29 @@ export class EntryService {
           await thread.setName(newName);
           console.log(`Renamed thread to: ${newName}`);
 
-          await thread.send(`**You complete your entry for ${displayName}!**\n\nThread is now read-only and archived.`);
+          // Create share button
+          const shareButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`share_thread_${thread.id}`)
+              .setLabel("📤 Share Thread")
+              .setStyle(ButtonStyle.Primary)
+          );
 
-          // Lock the thread to prevent new messages (but keep it visible)
-          await thread.setLocked(true);
-          console.log(`Locked thread: ${newName}`);
+          await thread.send({ 
+            content: `**You complete your entry for ${displayName}!**\n\nThread is now archived. Click the button below to share your entry.`,
+            components: [shareButton]
+          });
+
+          // Wait a moment before locking to allow button interaction
+          setTimeout(async () => {
+            try {
+              // Lock the thread to prevent new messages (but keep it visible)
+              await thread.setLocked(true);
+              console.log(`Locked thread: ${newName}`);
+            } catch (error) {
+              console.error('Error locking thread:', error);
+            }
+          }, 5000); // Wait 5 seconds before locking
 
           // Refresh thread cache to ensure we have the latest data
           try {
@@ -1094,7 +1114,7 @@ export class EntryService {
       'leetcode': 0xFFA500, // Orange
       'water': 0x0099FF, // Blue
       'sleep': 0x9932CC, // Purple
-      'work': 0x32CD32, // Green
+      'cardio': 0x32CD32, // Green
       'food': 0xFF6347, // Tomato
       'job applications': 0xFFD700, // Gold
       'exercise': 0xDC143C, // Crimson
@@ -1373,6 +1393,79 @@ export class EntryService {
 
     // Schedule 11:30 PM reminder
     this.scheduleReminder(23, 30, true); // 11:30 PM (last call)
+  }
+
+  static async shareThread(threadId: string, userId: string): Promise<void> {
+    try {
+      const client = (await import('../index')).client;
+      const thread = client.channels.cache.get(threadId) as ThreadChannel;
+      
+      if (!thread) {
+        console.error('Thread not found for sharing:', threadId);
+        return;
+      }
+
+      // Get the user who completed the entry
+      const guild = thread.guild;
+      const member = await guild.members.fetch(userId);
+      const displayName = member.displayName || member.user.username;
+
+      // Extract day number from thread name
+      const dayMatch = thread.name.match(/day-(\d+)/);
+      const dayNumber = dayMatch ? parseInt(dayMatch[1]) : this.getCurrentDayNumber();
+
+      // Collect all messages from the thread
+      const messages = await thread.messages.fetch({ limit: 100 });
+      const sortedMessages = messages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+      // Find the share channel
+      const shareChannelId = '1425381486395260980';
+      const shareChannel = client.channels.cache.get(shareChannelId) as TextChannel;
+      
+      if (!shareChannel) {
+        console.error('Share channel not found:', shareChannelId);
+        return;
+      }
+
+      // Create the main share embed
+      const shareEmbed = new EmbedBuilder()
+        .setTitle(`${displayName} chose to share their entry for day ${dayNumber}`)
+        .setColor(0x0099FF)
+        .setTimestamp()
+        .addFields({
+          name: 'Navigate to Thread',
+          value: `[${dayNumber}](https://discord.com/channels/${guild.id}/${thread.id})`,
+          inline: false
+        });
+
+      // Send the main share embed
+      await shareChannel.send({ embeds: [shareEmbed] });
+
+      // Send all embeds and content from the thread
+      for (const message of sortedMessages.values()) {
+        if (message.author.bot) continue; // Skip bot messages
+        
+        // If message has embeds, send them
+        if (message.embeds.length > 0) {
+          await shareChannel.send({ embeds: message.embeds });
+        }
+        
+        // If message has content, send it
+        if (message.content) {
+          await shareChannel.send({ content: message.content });
+        }
+        
+        // If message has attachments, send them
+        if (message.attachments.size > 0) {
+          const attachmentUrls = message.attachments.map(attachment => attachment.url);
+          await shareChannel.send({ content: `**Attachments:**\n${attachmentUrls.join('\n')}` });
+        }
+      }
+
+      console.log(`Successfully shared thread ${threadId} for user ${displayName}`);
+    } catch (error) {
+      console.error('Error sharing thread:', error);
+    }
   }
 
   private static scheduleReminder(hour: number, minute: number, isLastCall: boolean): void {

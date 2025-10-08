@@ -26,18 +26,13 @@ export const GOAL_DEFINITIONS: Record<string, GoalDefinition> = {
     requiresImage: true,
     requiresText: false,
   },
-  work: {
-    name: 'Work',
-    role: 'work',
-    emoji: '💼',
-    description: 'Submit number of work hours completed today. Example: 8.',
-    requiresImage: false,
-    requiresText: true,
-    validation: (content?: string) => {
-      if (!content) return false;
-      const num = parseFloat(content.trim());
-      return !isNaN(num) && num >= 0;
-    },
+  cardio: {
+    name: 'Cardio',
+    role: 'cardio',
+    emoji: '🏃',
+    description: 'Submit a Strava screenshot of your cardio workout.',
+    requiresImage: true,
+    requiresText: false,
   },
   food: {
     name: 'Food',
