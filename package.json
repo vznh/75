@@ -3,19 +3,9 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts"
-  },
-  "devDependencies": {
-    "@types/node": "^24.0.13",
-    "bun-types": "latest",
-    "tsx": "^4.20.3",
-    "typescript": "^5.8.3"
-  },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
+    "dev": "bun src/index.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.50.5",
     "discord.js": "^14.21.0",
     "dotenv": "^17.2.0"
   }
