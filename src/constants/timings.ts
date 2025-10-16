@@ -1,7 +1,7 @@
 // constants/timings
 export const REMINDER_TIMES = {
-  REGULAR_REMINDER: { hour: 23, minute: 0 },
-  LAST_CALL_REMINDER: { hour: 23, minute: 30 },
+	REGULAR_REMINDER: { hour: 23, minute: 0 },
+	LAST_CALL_REMINDER: { hour: 23, minute: 30 },
 } as const;
 
 export const CLEANUP_INTERVAL = 5 * 60 * 1000;

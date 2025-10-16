@@ -1,271 +1,320 @@
 // services/status-service
-import { EmbedBuilder, Guild, GuildMember, TextChannel } from 'discord.js';
-import { CHANNEL_IDS } from '../constants/channels';
-import { DEFAULT_COLOR } from '../constants/colors';
-import { EntryService } from './entry-service';
-import { GoalService } from './goal-service';
-import { handleError } from '../middleware/error-handler';
-import { logInfo, logError } from '../middleware/logging';
-import { getCurrentDayNumber } from '../utils/time-utils';
+import {
+	EmbedBuilder,
+	type Guild,
+	type GuildMember,
+	type TextChannel,
+} from "discord.js";
+import { CHANNEL_IDS } from "../constants/channels";
+import { DEFAULT_COLOR } from "../constants/colors";
+import { handleError } from "../middleware/error-handler";
+import { logError, logInfo } from "../middleware/logging";
+import { getCurrentDayNumber } from "../utils/time-utils";
+import { EntryService } from "./entry-service";
+import { GoalService } from "./goal-service";
 
 export class StatusService {
-  private static statusMessageId: string | null = null;
-  private static historyMessageId: string | null = null;
+	private static statusMessageId: string | null = null;
+	private static historyMessageId: string | null = null;
 
-  static async updateAccountabilityStatus(guild: Guild): Promise<void> {
-    try {
-      const channel = await guild.channels.fetch(CHANNEL_IDS.STATUS) as TextChannel;
+	static async updateAccountabilityStatus(guild: Guild): Promise<void> {
+		try {
+			const channel = (await guild.channels.fetch(
+				CHANNEL_IDS.STATUS,
+			)) as TextChannel;
 
-      if (!channel || !channel.isTextBased()) {
-        logError('Status channel not found or not text-based', CHANNEL_IDS.STATUS);
-        return;
-      }
+			if (!channel || !channel.isTextBased()) {
+				logError(
+					"Status channel not found or not text-based",
+					CHANNEL_IDS.STATUS,
+				);
+				return;
+			}
 
-      const allMembers = await guild.members.fetch();
-      const challengeMembers = allMembers.filter(member => {
-        if (member.user.bot) return false;
-        const memberRoles = member.roles.cache.map(role => role.name.toLowerCase());
-        const userGoals = GoalService.getUserGoals(memberRoles);
-        return userGoals.length > 0;
-      });
+			const allMembers = await guild.members.fetch();
+			const challengeMembers = allMembers.filter((member) => {
+				if (member.user.bot) return false;
+				const memberRoles = member.roles.cache.map((role) =>
+					role.name.toLowerCase(),
+				);
+				const userGoals = GoalService.getUserGoals(memberRoles);
+				return userGoals.length > 0;
+			});
 
-      const memberStatuses: Array<{ member: GuildMember; completed: boolean }> = [];
+			const memberStatuses: Array<{ member: GuildMember; completed: boolean }> =
+				[];
 
-      for (const member of challengeMembers.values()) {
-        const completed = await this.checkUserCompletionStatus(member);
-        memberStatuses.push({ member, completed });
-      }
+			for (const member of challengeMembers.values()) {
+				const completed = await StatusService.checkUserCompletionStatus(member);
+				memberStatuses.push({ member, completed });
+			}
 
-      const embed = new EmbedBuilder()
-        .setTitle("Statuses")
-        .setDescription('View all participants below and their statuses for today.')
-        .setColor(DEFAULT_COLOR)
-        .setTimestamp();
+			const embed = new EmbedBuilder()
+				.setTitle("Statuses")
+				.setDescription(
+					"View all participants below and their statuses for today.",
+				)
+				.setColor(DEFAULT_COLOR)
+				.setTimestamp();
 
-      for (const { member, completed } of memberStatuses) {
-        const displayName = member.displayName || member.user.username;
-        const statusEmoji = completed ? '✅' : '❌';
-        const statusText = completed ? 'Completed' : 'Not completed';
+			for (const { member, completed } of memberStatuses) {
+				const displayName = member.displayName || member.user.username;
+				const statusEmoji = completed ? "✅" : "❌";
+				const statusText = completed ? "Completed" : "Not completed";
 
-        embed.addFields({
-          name: `${statusEmoji} ${displayName}`,
-          value: statusText,
-          inline: true,
-        });
-      }
+				embed.addFields({
+					name: `${statusEmoji} ${displayName}`,
+					value: statusText,
+					inline: true,
+				});
+			}
 
-      if (this.statusMessageId) {
-        try {
-          const message = await channel.messages.fetch(this.statusMessageId);
-          await message.edit({ embeds: [embed] });
-          logInfo('Updated accountability status embed');
-        } catch (error) {
-          handleError(error, 'updating status message, will create new one');
-          this.statusMessageId = null;
-        }
-      }
+			if (StatusService.statusMessageId) {
+				try {
+					const message = await channel.messages.fetch(
+						StatusService.statusMessageId,
+					);
+					await message.edit({ embeds: [embed] });
+					logInfo("Updated accountability status embed");
+				} catch (error) {
+					handleError(error, "updating status message, will create new one");
+					StatusService.statusMessageId = null;
+				}
+			}
 
-      if (!this.statusMessageId) {
-        const message = await channel.send({ embeds: [embed] });
-        this.statusMessageId = message.id;
-        logInfo('Created new accountability status embed');
-      }
+			if (!StatusService.statusMessageId) {
+				const message = await channel.send({ embeds: [embed] });
+				StatusService.statusMessageId = message.id;
+				logInfo("Created new accountability status embed");
+			}
+		} catch (error) {
+			handleError(error, "updateAccountabilityStatus");
+		}
+	}
 
-    } catch (error) {
-      handleError(error, 'updateAccountabilityStatus');
-    }
-  }
+	static async updateHistoryEmbed(guild: Guild): Promise<void> {
+		try {
+			const channel = (await guild.channels.fetch(
+				CHANNEL_IDS.STATUS,
+			)) as TextChannel;
 
-  static async updateHistoryEmbed(guild: Guild): Promise<void> {
-    try {
-      const channel = await guild.channels.fetch(CHANNEL_IDS.STATUS) as TextChannel;
+			if (!channel || !channel.isTextBased()) {
+				logError(
+					"Status channel not found or not text-based",
+					CHANNEL_IDS.STATUS,
+				);
+				return;
+			}
 
-      if (!channel || !channel.isTextBased()) {
-        logError('Status channel not found or not text-based', CHANNEL_IDS.STATUS);
-        return;
-      }
+			const allMembers = await guild.members.fetch();
+			const challengeMembers = allMembers.filter((member) => {
+				if (member.user.bot) return false;
+				const memberRoles = member.roles.cache.map((role) =>
+					role.name.toLowerCase(),
+				);
+				const userGoals = GoalService.getUserGoals(memberRoles);
+				return userGoals.length > 0;
+			});
 
-      const allMembers = await guild.members.fetch();
-      const challengeMembers = allMembers.filter(member => {
-        if (member.user.bot) return false;
-        const memberRoles = member.roles.cache.map(role => role.name.toLowerCase());
-        const userGoals = GoalService.getUserGoals(memberRoles);
-        return userGoals.length > 0;
-      });
+			const historyData = await StatusService.reconstructHistoryFromThreads(
+				guild,
+				challengeMembers,
+			);
 
-      const historyData = await this.reconstructHistoryFromThreads(guild, challengeMembers);
+			const embed = new EmbedBuilder()
+				.setTitle("History")
+				.setDescription(StatusService.formatHistoryData(historyData))
+				.setColor(DEFAULT_COLOR)
+				.setTimestamp();
 
-      const embed = new EmbedBuilder()
-        .setTitle("History")
-        .setDescription(this.formatHistoryData(historyData))
-        .setColor(DEFAULT_COLOR)
-        .setTimestamp();
+			if (StatusService.historyMessageId) {
+				try {
+					const message = await channel.messages.fetch(
+						StatusService.historyMessageId,
+					);
+					await message.edit({ embeds: [embed] });
+					logInfo("Updated history embed");
+				} catch (error) {
+					handleError(error, "updating history message, will create new one");
+					StatusService.historyMessageId = null;
+				}
+			}
 
-      if (this.historyMessageId) {
-        try {
-          const message = await channel.messages.fetch(this.historyMessageId);
-          await message.edit({ embeds: [embed] });
-          logInfo('Updated history embed');
-        } catch (error) {
-          handleError(error, 'updating history message, will create new one');
-          this.historyMessageId = null;
-        }
-      }
+			if (!StatusService.historyMessageId) {
+				const message = await channel.send({ embeds: [embed] });
+				StatusService.historyMessageId = message.id;
+				logInfo("Created new history embed");
+			}
+		} catch (error) {
+			handleError(error, "updateHistoryEmbed");
+		}
+	}
 
-      if (!this.historyMessageId) {
-        const message = await channel.send({ embeds: [embed] });
-        this.historyMessageId = message.id;
-        logInfo('Created new history embed');
-      }
+	static async resetDailyStatus(): Promise<void> {
+		logInfo("Resetting daily accountability status for new day");
+		StatusService.statusMessageId = null;
+		StatusService.historyMessageId = null;
 
-    } catch (error) {
-      handleError(error, 'updateHistoryEmbed');
-    }
-  }
+		try {
+			const client = (await import("../index")).client;
+			await StatusService.updateAccountabilityStatus(
+				client.guilds.cache.first()!,
+			);
+			await StatusService.updateHistoryEmbed(client.guilds.cache.first()!);
+		} catch (error) {
+			handleError(error, "resetDailyStatus");
+		}
+	}
 
-  static async resetDailyStatus(): Promise<void> {
-    logInfo('Resetting daily accountability status for new day');
-    this.statusMessageId = null;
-    this.historyMessageId = null;
+	static async forceRefreshStatus(guild: Guild): Promise<void> {
+		try {
+			logInfo("🔄 Force refreshing status and history...");
 
-    try {
-      const client = (await import('../index')).client;
-      await this.updateAccountabilityStatus(client.guilds.cache.first()!);
-      await this.updateHistoryEmbed(client.guilds.cache.first()!);
-    } catch (error) {
-      handleError(error, 'resetDailyStatus');
-    }
-  }
+			const archiveChannel = guild.channels.cache.get(
+				CHANNEL_IDS.ARCHIVE,
+			) as TextChannel;
+			if (archiveChannel) {
+				await archiveChannel.threads.fetch();
+				logInfo("✅ Thread cache refreshed");
+			}
 
-  static async forceRefreshStatus(guild: Guild): Promise<void> {
-    try {
-      logInfo('🔄 Force refreshing status and history...');
-      
-      const archiveChannel = guild.channels.cache.get(CHANNEL_IDS.ARCHIVE) as TextChannel;
-      if (archiveChannel) {
-        await archiveChannel.threads.fetch();
-        logInfo('✅ Thread cache refreshed');
-      }
-      
-      await this.updateAccountabilityStatus(guild);
-      await this.updateHistoryEmbed(guild);
-      
-      logInfo('✅ Force refresh completed');
-    } catch (error) {
-      handleError(error, 'force refresh');
-    }
-  }
+			await StatusService.updateAccountabilityStatus(guild);
+			await StatusService.updateHistoryEmbed(guild);
 
-  private static async reconstructHistoryFromThreads(guild: Guild, challengeMembers: any): Promise<Map<number, { completed: string[], incomplete: string[] }>> {
-    const historyData = new Map<number, { completed: string[], incomplete: string[] }>();
-    
-    try {
-      const archiveChannel = guild.channels.cache.get(CHANNEL_IDS.ARCHIVE) as TextChannel;
+			logInfo("✅ Force refresh completed");
+		} catch (error) {
+			handleError(error, "force refresh");
+		}
+	}
 
-      if (!archiveChannel) {
-        logError('Archive channel not found for history reconstruction');
-        return historyData;
-      }
+	private static async reconstructHistoryFromThreads(
+		guild: Guild,
+		challengeMembers: any,
+	): Promise<Map<number, { completed: string[]; incomplete: string[] }>> {
+		const historyData = new Map<
+			number,
+			{ completed: string[]; incomplete: string[] }
+		>();
 
-      const currentDay = getCurrentDayNumber();
+		try {
+			const archiveChannel = guild.channels.cache.get(
+				CHANNEL_IDS.ARCHIVE,
+			) as TextChannel;
 
-      for (let day = 1; day <= currentDay; day++) {
-        const completed: string[] = [];
-        const incomplete: string[] = [];
+			if (!archiveChannel) {
+				logError("Archive channel not found for history reconstruction");
+				return historyData;
+			}
 
-        for (const member of challengeMembers.values()) {
-          const displayName = member.displayName || member.user.username;
-          
-          const userThreads = archiveChannel.threads.cache.filter(thread => {
-            return thread.name === `archive-${displayName}-entry-day-${day}`;
-          });
+			const currentDay = getCurrentDayNumber();
 
-          if (userThreads.size > 0) {
-            completed.push(displayName);
-          } else {
-            incomplete.push(displayName);
-          }
-        }
+			for (let day = 1; day <= currentDay; day++) {
+				const completed: string[] = [];
+				const incomplete: string[] = [];
 
-        historyData.set(day, { completed, incomplete });
-      }
+				for (const member of challengeMembers.values()) {
+					const displayName = member.displayName || member.user.username;
 
-    } catch (error) {
-      handleError(error, 'reconstructHistoryFromThreads');
-    }
+					const userThreads = archiveChannel.threads.cache.filter((thread) => {
+						return thread.name === `archive-${displayName}-entry-day-${day}`;
+					});
 
-    return historyData;
-  }
+					if (userThreads.size > 0) {
+						completed.push(displayName);
+					} else {
+						incomplete.push(displayName);
+					}
+				}
 
-  private static formatHistoryData(historyData: Map<number, { completed: string[], incomplete: string[] }>): string {
-    let formattedHistory = '';
+				historyData.set(day, { completed, incomplete });
+			}
+		} catch (error) {
+			handleError(error, "reconstructHistoryFromThreads");
+		}
 
-    const sortedDays = Array.from(historyData.keys()).sort((a, b) => a - b);
+		return historyData;
+	}
 
-    for (const day of sortedDays) {
-      const dayData = historyData.get(day);
-      if (!dayData) continue;
+	private static formatHistoryData(
+		historyData: Map<number, { completed: string[]; incomplete: string[] }>,
+	): string {
+		let formattedHistory = "";
 
-      formattedHistory += `**Day ${day}**\n`;
-      
-      if (dayData.completed.length > 0) {
-        formattedHistory += `C: ${dayData.completed.join(', ')}\n`;
-      } else {
-        formattedHistory += `C: (none)\n`;
-      }
-      
-      if (dayData.incomplete.length > 0) {
-        formattedHistory += `IC: ${dayData.incomplete.join(', ')}\n`;
-      } else {
-        formattedHistory += `IC: (none)\n`;
-      }
-      
-      formattedHistory += '\n';
-    }
+		const sortedDays = Array.from(historyData.keys()).sort((a, b) => a - b);
 
-    return `\`\`\`\n${formattedHistory.trim()}\n\`\`\``;
-  }
+		for (const day of sortedDays) {
+			const dayData = historyData.get(day);
+			if (!dayData) continue;
 
-  private static async checkUserCompletionStatus(member: GuildMember): Promise<boolean> {
-    try {
-      const archiveChannel = member.guild.channels.cache.get(CHANNEL_IDS.ARCHIVE) as TextChannel;
-      const dayNumber = getCurrentDayNumber();
-      const displayName = member.displayName || member.user.username;
+			formattedHistory += `**Day ${day}**\n`;
 
-      if (!archiveChannel) {
-        logError('Archive channel not found for completion check');
-        return false;
-      }
+			if (dayData.completed.length > 0) {
+				formattedHistory += `C: ${dayData.completed.join(", ")}\n`;
+			} else {
+				formattedHistory += `C: (none)\n`;
+			}
 
-      try {
-        await archiveChannel.threads.fetch();
-        logInfo(`Refreshed thread cache for completion check of ${displayName}`);
-      } catch (error) {
-        handleError(error, 'refreshing thread cache for completion check');
-      }
+			if (dayData.incomplete.length > 0) {
+				formattedHistory += `IC: ${dayData.incomplete.join(", ")}\n`;
+			} else {
+				formattedHistory += `IC: (none)\n`;
+			}
 
-      const expectedThreadName = `archive-${displayName}-entry-day-${dayNumber}`;
-      logInfo(`Looking for thread: ${expectedThreadName}`);
-      
-      const userThreads = archiveChannel.threads.cache.filter(thread => {
-        const matches = thread.name === expectedThreadName;
-        if (matches) {
-          logInfo(`Found matching thread: ${thread.name} (locked: ${thread.locked})`);
-        }
-        return matches;
-      });
+			formattedHistory += "\n";
+		}
 
-      logInfo(`Thread search result for ${displayName}: ${userThreads.size} threads found`);
+		return `\`\`\`\n${formattedHistory.trim()}\n\`\`\``;
+	}
 
-      if (userThreads.size === 0) {
-        return false;
-      }
+	private static async checkUserCompletionStatus(
+		member: GuildMember,
+	): Promise<boolean> {
+		try {
+			const archiveChannel = member.guild.channels.cache.get(
+				CHANNEL_IDS.ARCHIVE,
+			) as TextChannel;
+			const dayNumber = getCurrentDayNumber();
+			const displayName = member.displayName || member.user.username;
 
-      return true;
+			if (!archiveChannel) {
+				logError("Archive channel not found for completion check");
+				return false;
+			}
 
-    } catch (error) {
-      handleError(error, 'checking user completion status');
-      return false;
-    }
-  }
+			try {
+				await archiveChannel.threads.fetch();
+				logInfo(
+					`Refreshed thread cache for completion check of ${displayName}`,
+				);
+			} catch (error) {
+				handleError(error, "refreshing thread cache for completion check");
+			}
+
+			const expectedThreadName = `archive-${displayName}-entry-day-${dayNumber}`;
+			logInfo(`Looking for thread: ${expectedThreadName}`);
+
+			const userThreads = archiveChannel.threads.cache.filter((thread) => {
+				const matches = thread.name === expectedThreadName;
+				if (matches) {
+					logInfo(
+						`Found matching thread: ${thread.name} (locked: ${thread.locked})`,
+					);
+				}
+				return matches;
+			});
+
+			logInfo(
+				`Thread search result for ${displayName}: ${userThreads.size} threads found`,
+			);
+
+			if (userThreads.size === 0) {
+				return false;
+			}
+
+			return true;
+		} catch (error) {
+			handleError(error, "checking user completion status");
+			return false;
+		}
+	}
 }

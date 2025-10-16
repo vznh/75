@@ -1,2 +1,2 @@
 // buttons/share-buttons
-export * from './entry-buttons';
+export * from "./entry-buttons";

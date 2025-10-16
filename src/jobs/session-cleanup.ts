@@ -1,9 +1,10 @@
 // jobs/session-cleanup
-import { EntryService } from '../services/entry-service';
-import { CLEANUP_INTERVAL } from '../constants/timings';
+
+import { CLEANUP_INTERVAL } from "../constants/timings";
+import { EntryService } from "../services/entry-service";
 
 export function startSessionCleanup(): void {
-  setInterval(() => {
-    EntryService.cleanupExpiredSessions();
-  }, CLEANUP_INTERVAL);
+	setInterval(() => {
+		EntryService.cleanupExpiredSessions();
+	}, CLEANUP_INTERVAL);
 }
