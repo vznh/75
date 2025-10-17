@@ -97,7 +97,7 @@ export class RoleService {
 			);
 
 			await channel.send({
-				content: "Click the button below to create your own custom goal!",
+				content: "### 🪡\nYou can create your own goal here, customizable with the name, description, input and color.\nAll roles here will be displayed in #marketplace.\n",
 				components: [button]
 			});
 
@@ -107,7 +107,7 @@ export class RoleService {
 		}
 	}
 
-	
+
 	private static async createCustomRole(guild: Guild, goalData: any): Promise<ServiceResponse & { roleId?: string }> {
 		try {
 			const roleName = goalData.shorthand;

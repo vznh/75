@@ -3,17 +3,14 @@ import {
 	ActionRowBuilder,
 	ButtonBuilder,
 	ButtonStyle,
-	EmbedBuilder,
 	type TextChannel,
 } from "discord.js";
 import { client } from "..";
+import { EmbedTemplates } from "../constants/embeds";
+import { PlaintextTemplates } from "../constants/plaintext";
 
 export async function main(channelId: string) {
-	const embed = new EmbedBuilder()
-		.setTitle("📝 Submit your entries here!")
-		.setDescription(
-			"The bot is successfully loaded. Use any action below to log.",
-		);
+	const embed = EmbedTemplates.createEntryButtonEmbed();
 
 	const actions = new ActionRowBuilder<ButtonBuilder>().addComponents(
 		new ButtonBuilder()
@@ -36,15 +33,8 @@ export async function main(channelId: string) {
 }
 
 export async function sendInstructionsAndButtons() {
-	// Send instructional embed first
-	const instructionEmbed = new EmbedBuilder()
-		.setTitle("**Instructions**")
-		.setDescription(
-			"This bot is meant to track your 75 progress, check if you have completed your goals, communicate to others and hold your archive. Below are the two actions that you can take to create an entry or review your previous entries.\n\n" +
-				"**Create an entry** gets you started with a new thread to submit - you cannot create a new thread if one is existent.\n\n" +
-				'**View previous entries** sends you a DM (if permissible) with all of the days as "{link to channel} for day {day}."',
-		)
-		.setColor(0x0099ff);
+	// Send instructional message as plaintext first
+	const instructions = PlaintextTemplates.getInstructions();
 
 	// Create the action buttons
 	const actions = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -64,7 +54,7 @@ export async function sendInstructionsAndButtons() {
 
 	if (channel && channel.isTextBased()) {
 		await (channel as TextChannel).send({
-			embeds: [instructionEmbed],
+			content: instructions,
 		});
 
 		await (channel as TextChannel).send({

@@ -13,6 +13,8 @@ import {
 import { CHANNEL_IDS } from "../constants/channels";
 import { DEFAULT_COLOR, GOAL_COLORS } from "../constants/colors";
 import { MESSAGES } from "../constants/messages";
+import { EmbedTemplates } from "../constants/embeds";
+import { PlaintextTemplates, PLAINTEXT_MESSAGES } from "../constants/plaintext";
 import { handleAsyncError, handleError } from "../middleware/error-handler";
 import { logDebug, logError, logInfo } from "../middleware/logging";
 import type { EntrySession, GoalSubmission } from "../models/entry";
@@ -75,7 +77,7 @@ export class EntryService {
 				return;
 			}
 
-			const threadName = `${displayName}-entry-day-${dayNumber}`;
+			const threadName = PlaintextTemplates.getThreadNameEntry(displayName, dayNumber);
 			let thread;
 			try {
 				thread = await archiveChannel.threads.create({
@@ -211,22 +213,17 @@ export class EntryService {
 					}
 
 					if (!entryLinks) {
-						entryLinks = `No previous entries found. Start your challenge with the "Create an entry" button!\n`;
+						entryLinks = PLAINTEXT_MESSAGES.NO_PREVIOUS_ENTRIES;
 					}
 				} catch (error) {
 					handleError(error, "searching for previous threads");
-					entryLinks = `Error retrieving previous entries. Please try again later.\n`;
+					entryLinks = PLAINTEXT_MESSAGES.ERROR_RETRIEVING_ENTRIES;
 				}
 			} else {
-				entryLinks = `Archive channel not found. Please contact an administrator.\n`;
+				entryLinks = PLAINTEXT_MESSAGES.ARCHIVE_CHANNEL_NOT_FOUND;
 			}
 
-			const embedDescription = `All of your previous entries are detailed below. Click on a text channel when you're finished.\n\n${entryLinks}`;
-
-			const embed = new EmbedBuilder()
-				.setDescription(embedDescription)
-				.setColor(DEFAULT_COLOR)
-				.setTimestamp();
+			const embed = EmbedTemplates.createPreviousEntriesEmbed(entryLinks);
 
 			try {
 				await member.send({ embeds: [embed] });
@@ -243,7 +240,7 @@ export class EntryService {
 
 				if (channel) {
 					await channel.send(
-						`**${member.displayName || member.user.username}**\nCould not send DM. Check your previous entries using the buttons.`,
+						PlaintextTemplates.getCouldNotSendDM(member.displayName || member.user.username),
 					);
 				}
 			}
@@ -285,17 +282,8 @@ export class EntryService {
 				return;
 			}
 
-			const shareEmbed = new EmbedBuilder()
-				.setTitle(
-					`${displayName} chose to share their entry for day ${dayNumber}`,
-				)
-				.setColor(DEFAULT_COLOR)
-				.setTimestamp()
-				.addFields({
-					name: "Navigate to Thread",
-					value: `[${dayNumber}](https://discord.com/channels/${guild.id}/${thread.id})`,
-					inline: false,
-				});
+			const shareEmbed = EmbedTemplates.createShareEmbed(displayName, dayNumber, 
+				`[${dayNumber}](https://discord.com/channels/${guild.id}/${thread.id})`);
 
 			await shareChannel.send({ embeds: [shareEmbed] });
 
@@ -315,7 +303,7 @@ export class EntryService {
 						(attachment) => attachment.url,
 					);
 					await shareChannel.send({
-						content: `**Attachments:**\n${attachmentUrls.join("\n")}`,
+						content: PLAINTEXT_MESSAGES.SHARE_ATTACHMENTS_PREFIX + attachmentUrls.join("\n"),
 					});
 				}
 			}
@@ -394,13 +382,7 @@ export class EntryService {
 				description += `* **Weekly goals must be completed by the end of the week (today)**\n`;
 			}
 
-			const embed = new EmbedBuilder()
-				.setTitle(`Day ${dayNumber}`)
-				.setDescription(description)
-				.setColor(DEFAULT_COLOR)
-				.setTimestamp();
-
-			await thread.send({ embeds: [embed] });
+			await thread.send({ embeds: [EmbedTemplates.createInitialEntryEmbed(dayNumber, userGoals, userWeeklyGoals)] });
 		} catch (error) {
 			handleError(error, "sendInitialEntryEmbed");
 			throw error;
@@ -412,10 +394,7 @@ export class EntryService {
 		goalDef: any,
 	): Promise<Message> {
 		try {
-			const embed = new EmbedBuilder()
-				.setTitle(`${goalDef.emoji} ${goalDef.name}`)
-				.setDescription(goalDef.description)
-				.setColor(EntryService.getGoalColor(goalDef.role));
+			const embed = EmbedTemplates.createGoalEmbed(goalDef);
 
 			const requirements = getValidationRequirements(goalDef);
 
@@ -440,15 +419,15 @@ export class EntryService {
 		dayNumber: number,
 	): Promise<Message> {
 		try {
-			const embed = new EmbedBuilder()
-				.setTitle(`📅 ${goalDef.emoji} ${goalDef.name} (Weekly)`)
-				.setDescription(goalDef.description)
-				.setColor(EntryService.getGoalColor(goalDef.role))
-				.addFields({
+			const embed = EmbedTemplates.createWeeklyGoalEmbed(goalDef, dayNumber);
+
+			if (isLastDayOfWeek(dayNumber)) {
+				embed.setFields({
 					name: "Weekly Goal",
-					value: `This is a weekly goal. ${isLastDayOfWeek(dayNumber) ? "**Must be completed today!**" : "Complete anytime this week."}`,
+					value: `This is a weekly goal. **Must be completed today!**`,
 					inline: false,
 				});
+			}
 
 			const requirements = getValidationRequirements(goalDef);
 
@@ -674,7 +653,7 @@ export class EntryService {
 						`Thread ${thread.name} is already in archive channel ${thread.parentId}`,
 					);
 
-					const newName = `archive-${thread.name}`;
+					const newName = PlaintextTemplates.getThreadNameRenamed(thread.name);
 					await thread.setName(newName);
 					logInfo(`Renamed thread to: ${newName}`);
 
@@ -687,7 +666,7 @@ export class EntryService {
 						);
 
 					await thread.send({
-						content: `**You complete your entry for ${displayName}!**\n\nThread is now archived. Click the button below to share your entry.`,
+						content: PlaintextTemplates.getEntryComplete(displayName),
 						components: [shareButton],
 					});
 

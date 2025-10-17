@@ -8,16 +8,14 @@ import {
 import { CHANNEL_IDS } from "../constants/channels";
 import { EntryController } from "../controllers/entry-controller";
 import { logError, logInfo } from "../middleware/logging";
-import {
-	createEntryButtonEmbed,
-	createInstructionEmbed,
-} from "../utils/embed-utils";
+import { createEntryButtonEmbed } from "../utils/embed-utils";
+import { PlaintextTemplates } from "../constants/plaintext";
 
 export class EntryButtons {
 	static async sendInstructionsAndButtons(): Promise<void> {
 		const { client } = await import("../index");
 
-		const instructionEmbed = createInstructionEmbed();
+		const instructions = PlaintextTemplates.getInstructions();
 
 		const actions = new ActionRowBuilder<ButtonBuilder>().addComponents(
 			new ButtonBuilder()
@@ -35,7 +33,7 @@ export class EntryButtons {
 
 		if (channel && channel.isTextBased()) {
 			await (channel as TextChannel).send({
-				embeds: [instructionEmbed],
+				content: instructions,
 			});
 
 			await (channel as TextChannel).send({

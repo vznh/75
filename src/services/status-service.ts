@@ -7,6 +7,8 @@ import {
 } from "discord.js";
 import { CHANNEL_IDS } from "../constants/channels";
 import { DEFAULT_COLOR } from "../constants/colors";
+import { EmbedTemplates } from "../constants/embeds";
+import { PLAINTEXT_MESSAGES } from "../constants/plaintext";
 import { handleError } from "../middleware/error-handler";
 import { logError, logInfo } from "../middleware/logging";
 import { getCurrentDayNumber } from "../utils/time-utils";
@@ -49,13 +51,11 @@ export class StatusService {
 				memberStatuses.push({ member, completed });
 			}
 
-			const embed = new EmbedBuilder()
+			const embed = EmbedTemplates.createAccountabilityStatusEmbed()
 				.setTitle("Statuses")
 				.setDescription(
 					"View all participants below and their statuses for today.",
-				)
-				.setColor(DEFAULT_COLOR)
-				.setTimestamp();
+				);
 
 			for (const { member, completed } of memberStatuses) {
 				const displayName = member.displayName || member.user.username;
@@ -121,11 +121,11 @@ export class StatusService {
 				challengeMembers,
 			);
 
-			const embed = new EmbedBuilder()
-				.setTitle("History")
-				.setDescription(StatusService.formatHistoryData(historyData))
-				.setColor(DEFAULT_COLOR)
-				.setTimestamp();
+			const embed = EmbedTemplates.createBaseEmbed({
+				title: "History",
+				description: StatusService.formatHistoryData(historyData),
+				color: DEFAULT_COLOR,
+			});
 
 			if (StatusService.historyMessageId) {
 				try {
@@ -168,20 +168,20 @@ export class StatusService {
 
 	static async forceRefreshStatus(guild: Guild): Promise<void> {
 		try {
-			logInfo("🔄 Force refreshing status and history...");
+			logInfo(PLAINTEXT_MESSAGES.REFRESHING_THREAD_CACHE);
 
 			const archiveChannel = guild.channels.cache.get(
 				CHANNEL_IDS.ARCHIVE,
 			) as TextChannel;
 			if (archiveChannel) {
 				await archiveChannel.threads.fetch();
-				logInfo("✅ Thread cache refreshed");
+				logInfo(PLAINTEXT_MESSAGES.THREAD_CACHE_REFRESHED);
 			}
 
 			await StatusService.updateAccountabilityStatus(guild);
 			await StatusService.updateHistoryEmbed(guild);
 
-			logInfo("✅ Force refresh completed");
+			logInfo(PLAINTEXT_MESSAGES.FORCE_REFRESH_COMPLETED);
 		} catch (error) {
 			handleError(error, "force refresh");
 		}
